@@ -42,6 +42,7 @@ void AProspectorPlayerController::EnsureDefaultInputAssets()
 	MakeAction(PanTiltAction, EInputActionValueType::Axis2D, TEXT("IA_PanTilt_Runtime"));
 	MakeAction(SelectAction, EInputActionValueType::Boolean, TEXT("IA_SelectCommand_Runtime"));
 	MakeAction(DeselectAction, EInputActionValueType::Boolean, TEXT("IA_DeselectCommand_Runtime"));
+	MakeAction(TabCycleAction, EInputActionValueType::Boolean, TEXT("IA_TabCycleCommand_Runtime"));
 
 	if (DefaultMappingContext)
 	{
@@ -64,6 +65,7 @@ void AProspectorPlayerController::EnsureDefaultInputAssets()
 	IMC->MapKey(PanTiltAction, EKeys::Mouse2D);
 	IMC->MapKey(SelectAction, EKeys::LeftMouseButton);
 	IMC->MapKey(DeselectAction, EKeys::Escape);
+	IMC->MapKey(TabCycleAction, EKeys::Tab);
 
 	DefaultMappingContext = IMC;
 }
@@ -133,6 +135,12 @@ void AProspectorPlayerController::SetupInputComponent()
 		if (DeselectAction)
 		{
 			EnhancedInputComponent->BindAction(DeselectAction, ETriggerEvent::Started, this, &AProspectorPlayerController::DoDeselectCommand);
+		}
+		if (TabCycleAction)
+		{
+			// Started (not Triggered) so holding Tab down doesn't cycle every frame - one keypress
+			// advances exactly one unit.
+			EnhancedInputComponent->BindAction(TabCycleAction, ETriggerEvent::Started, this, &AProspectorPlayerController::DoTabCycleCommand);
 		}
 	}
 }
@@ -353,4 +361,39 @@ void AProspectorPlayerController::DoSelectCommand(const FInputActionValue& Value
 void AProspectorPlayerController::DoDeselectCommand(const FInputActionValue& Value)
 {
 	DeselectCurrentUnit();
+}
+
+void AProspectorPlayerController::DoTabCycleCommand(const FInputActionValue& Value)
+{
+	TArray<AActor*> SelectableActors;
+	UGameplayStatics::GetAllActorsWithInterface(this, USelectableUnit::StaticClass(), SelectableActors);
+	SelectableActors.RemoveAll([](const AActor* Actor) { return !IsValid(Actor); });
+
+	if (SelectableActors.Num() == 0)
+	{
+		return;
+	}
+
+	// Stable, deterministic order regardless of world-scan iteration order.
+	SelectableActors.Sort([](const AActor& A, const AActor& B)
+	{
+		return A.GetFName().LexicalLess(B.GetFName());
+	});
+
+	// If the currently selected unit isn't in the (still-valid) list - including the case where it was
+	// destroyed and SelectedUnit already resolved to null - start over from the first entry.
+	int32 NextIndex = 0;
+	if (AActor* Current = SelectedUnit.Get())
+	{
+		const int32 CurrentIndex = SelectableActors.IndexOfByKey(Current);
+		if (CurrentIndex != INDEX_NONE)
+		{
+			NextIndex = (CurrentIndex + 1) % SelectableActors.Num();
+		}
+	}
+
+	// SelectUnit no-ops if this is already the selected actor (single-unit case: Tab keeps Bill selected,
+	// no flicker), and otherwise reuses the normal deselect-then-select cleanup (ends manual movement on
+	// the outgoing unit, toggles the visual state on both).
+	SelectUnit(SelectableActors[NextIndex]);
 }

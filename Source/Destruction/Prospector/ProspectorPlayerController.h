@@ -56,6 +56,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> DeselectAction;
 
+	// Tab: cycle selection to the next valid ISelectableUnit actor, wrapping around.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> TabCycleAction;
+
 	// Selects Unit if it implements ISelectableUnit; no-ops (and does not deselect) otherwise.
 	void SelectUnit(AActor* Unit);
 
@@ -84,6 +88,7 @@ private:
 	void DoPanTilt(const FInputActionValue& Value);
 	void DoSelectCommand(const FInputActionValue& Value);
 	void DoDeselectCommand(const FInputActionValue& Value);
+	void DoTabCycleCommand(const FInputActionValue& Value);
 
 	bool GetCursorGroundHit(FHitResult& OutHit) const;
 	AProspectorCharacter* GetProspector() const;
