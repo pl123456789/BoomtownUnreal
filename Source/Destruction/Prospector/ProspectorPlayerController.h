@@ -91,7 +91,6 @@ private:
 	void DoTabCycleCommand(const FInputActionValue& Value);
 
 	bool GetCursorGroundHit(FHitResult& OutHit) const;
-	AProspectorCharacter* GetProspector() const;
 
 	// True while either Shift key is held - queues a command onto the Prospector's job queue
 	// instead of running it immediately.

@@ -150,11 +150,6 @@ bool AProspectorPlayerController::GetCursorGroundHit(FHitResult& OutHit) const
 	return GetHitResultUnderCursorByChannel(UEngineTypes::ConvertToTraceType(ECC_WorldStatic), false, OutHit) && OutHit.bBlockingHit;
 }
 
-AProspectorCharacter* AProspectorPlayerController::GetProspector() const
-{
-	return Cast<AProspectorCharacter>(UGameplayStatics::GetActorOfClass(GetWorld(), AProspectorCharacter::StaticClass()));
-}
-
 bool AProspectorPlayerController::IsShiftHeld() const
 {
 	return IsInputKeyDown(EKeys::LeftShift) || IsInputKeyDown(EKeys::RightShift);
@@ -294,22 +289,27 @@ void AProspectorPlayerController::DoMoveCommand(const FInputActionValue& Value)
 
 void AProspectorPlayerController::DoDigCommand(const FInputActionValue& Value)
 {
+	// E only ever acts on the selected unit - no world search, no implicit fallback to another
+	// Prospector. A non-Prospector or no selection at all is a safe no-op.
+	AProspectorCharacter* Prospector = Cast<AProspectorCharacter>(SelectedUnit.Get());
+	if (!Prospector)
+	{
+		return;
+	}
+
 	FHitResult Hit;
 	const bool bHit = GetCursorGroundHit(Hit);
 
 	if (bHit)
 	{
-		if (AProspectorCharacter* Prospector = GetProspector())
+		if (IsShiftHeld())
 		{
-			if (IsShiftHeld())
-			{
-				Prospector->EnqueueDigJob(Hit.GetActor(), Hit.Location);
-			}
-			else
-			{
-				Prospector->ClearJobQueue();
-				Prospector->RequestDigAt(Hit.GetActor(), Hit.Location);
-			}
+			Prospector->EnqueueDigJob(Hit.GetActor(), Hit.Location);
+		}
+		else
+		{
+			Prospector->ClearJobQueue();
+			Prospector->RequestDigAt(Hit.GetActor(), Hit.Location);
 		}
 	}
 	else if (GEngine)
@@ -320,24 +320,29 @@ void AProspectorPlayerController::DoDigCommand(const FInputActionValue& Value)
 
 void AProspectorPlayerController::DoPanCommand(const FInputActionValue& Value)
 {
-	if (AProspectorCharacter* Prospector = GetProspector())
+	// F only ever acts on the selected unit - see DoDigCommand.
+	AProspectorCharacter* Prospector = Cast<AProspectorCharacter>(SelectedUnit.Get());
+	if (!Prospector)
 	{
-		if (IsShiftHeld())
-		{
-			Prospector->EnqueuePanJob();
-		}
-		else
-		{
-			Prospector->ClearJobQueue();
-			Prospector->RequestPan();
-		}
+		return;
+	}
+
+	if (IsShiftHeld())
+	{
+		Prospector->EnqueuePanJob();
+	}
+	else
+	{
+		Prospector->ClearJobQueue();
+		Prospector->RequestPan();
 	}
 }
 
 void AProspectorPlayerController::DoPanTilt(const FInputActionValue& Value)
 {
+	// Mouse pan-tilt input only ever reaches the selected unit - see DoDigCommand.
 	const FVector2D Tilt = Value.Get<FVector2D>();
-	if (AProspectorCharacter* Prospector = GetProspector())
+	if (AProspectorCharacter* Prospector = Cast<AProspectorCharacter>(SelectedUnit.Get()))
 	{
 		Prospector->RequestPanTilt(Tilt);
 	}
