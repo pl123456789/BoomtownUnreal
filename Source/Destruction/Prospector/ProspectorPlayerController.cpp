@@ -157,11 +157,6 @@ void AProspectorPlayerController::DoMoveCommand(const FInputActionValue& Value)
 {
 	FHitResult Hit;
 	const bool bHit = GetCursorGroundHit(Hit);
-	UE_LOG(LogTemp, Warning, TEXT("[InputDiag] DoMoveCommand fired: CursorHit=%s Actor=%s Location=%s Prospector=%s"),
-		bHit ? TEXT("true") : TEXT("false"),
-		(bHit && Hit.GetActor()) ? *Hit.GetActor()->GetName() : TEXT("NULL"),
-		*Hit.Location.ToString(),
-		GetProspector() ? TEXT("valid") : TEXT("NULL"));
 
 	if (bHit)
 	{
@@ -180,7 +175,7 @@ void AProspectorPlayerController::DoMoveCommand(const FInputActionValue& Value)
 	}
 	else if (GEngine)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("[InputDiag] Move command fired but no cursor hit."));
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("Move command fired but no cursor hit."));
 	}
 }
 
@@ -188,10 +183,6 @@ void AProspectorPlayerController::DoDigCommand(const FInputActionValue& Value)
 {
 	FHitResult Hit;
 	const bool bHit = GetCursorGroundHit(Hit);
-	UE_LOG(LogTemp, Warning, TEXT("[InputDiag] DoDigCommand fired: CursorHit=%s Actor=%s Prospector=%s"),
-		bHit ? TEXT("true") : TEXT("false"),
-		(bHit && Hit.GetActor()) ? *Hit.GetActor()->GetName() : TEXT("NULL"),
-		GetProspector() ? TEXT("valid") : TEXT("NULL"));
 
 	if (bHit)
 	{
@@ -210,7 +201,7 @@ void AProspectorPlayerController::DoDigCommand(const FInputActionValue& Value)
 	}
 	else if (GEngine)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("[InputDiag] Dig key fired but no cursor hit."));
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("Dig key fired but no cursor hit."));
 	}
 }
 
@@ -232,8 +223,9 @@ void AProspectorPlayerController::DoPanCommand(const FInputActionValue& Value)
 
 void AProspectorPlayerController::DoPanTilt(const FInputActionValue& Value)
 {
+	const FVector2D Tilt = Value.Get<FVector2D>();
 	if (AProspectorCharacter* Prospector = GetProspector())
 	{
-		Prospector->RequestPanTilt(Value.Get<FVector2D>());
+		Prospector->RequestPanTilt(Tilt);
 	}
 }

@@ -14,7 +14,6 @@
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 
 AProspectorCharacter::AProspectorCharacter()
 {
@@ -71,20 +70,23 @@ void AProspectorCharacter::BeginPlay()
 
 void AProspectorCharacter::RequestMoveTo(const FVector& Destination)
 {
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan,
-			FString::Printf(TEXT("[InputDiag] RequestMoveTo: %s Controller=%s"),
-				*Destination.ToString(), GetController() ? *GetController()->GetClass()->GetName() : TEXT("NULL")));
-	}
-	DrawDebugSphere(GetWorld(), Destination, 40.0f, 12, FColor::Cyan, false, 5.0f);
-
 	if (PanningComponent && PanningComponent->IsPanningActive())
 	{
 		return;
 	}
 
-	UAIBlueprintHelperLibrary::SimpleMoveToLocation(GetController(), Destination);
+	if (AAIController* AIController = Cast<AAIController>(GetController()))
+	{
+		const EPathFollowingRequestResult::Type Result = AIController->MoveToLocation(Destination);
+		if (Result == EPathFollowingRequestResult::Failed)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("RequestMoveTo: MoveToLocation failed for destination %s"), *Destination.ToString());
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("Can't reach that spot."));
+			}
+		}
+	}
 }
 
 void AProspectorCharacter::RequestDigAt(AActor* TargetActor, const FVector& WorldLocation)
