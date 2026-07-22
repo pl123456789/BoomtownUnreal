@@ -47,7 +47,29 @@ AProspectorCharacter::AProspectorCharacter()
 		PlaceholderMesh->SetStaticMesh(CylinderMeshAsset.Object);
 	}
 
+	// Selection indicator - a flat disc beneath the unit, hidden until selected. Reuses the same
+	// engine cylinder mesh as the placeholder body, just squashed flat.
+	SelectionRingMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SelectionRingMesh"));
+	SelectionRingMesh->SetupAttachment(RootComponent);
+	SelectionRingMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -94.0f));
+	SelectionRingMesh->SetRelativeScale3D(FVector(1.3f, 1.3f, 0.02f));
+	SelectionRingMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SelectionRingMesh->SetVisibility(false);
+	if (CylinderMeshAsset.Succeeded())
+	{
+		SelectionRingMesh->SetStaticMesh(CylinderMeshAsset.Object);
+	}
+
 	PanningComponent = CreateDefaultSubobject<UPanningMinigameComponent>(TEXT("PanningComponent"));
+}
+
+void AProspectorCharacter::SetSelected(bool bSelected)
+{
+	bIsSelected = bSelected;
+	if (SelectionRingMesh)
+	{
+		SelectionRingMesh->SetVisibility(bSelected);
+	}
 }
 
 void AProspectorCharacter::BeginPlay()

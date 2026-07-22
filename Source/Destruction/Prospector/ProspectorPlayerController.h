@@ -48,6 +48,23 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> PanTiltAction;
 
+	// Left click: select a unit under the cursor, or deselect if nothing selectable is hit.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> SelectAction;
+
+	// Escape: deselect the current unit.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> DeselectAction;
+
+	// Selects Unit if it implements ISelectableUnit; no-ops (and does not deselect) otherwise.
+	void SelectUnit(AActor* Unit);
+
+	// Clears the current selection, if any, and updates its visual state.
+	void DeselectCurrentUnit();
+
+	UFUNCTION(BlueprintPure, Category = "Selection")
+	AActor* GetSelectedUnit() const { return SelectedUnit.Get(); }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -64,6 +81,8 @@ private:
 	void DoDigCommand(const FInputActionValue& Value);
 	void DoPanCommand(const FInputActionValue& Value);
 	void DoPanTilt(const FInputActionValue& Value);
+	void DoSelectCommand(const FInputActionValue& Value);
+	void DoDeselectCommand(const FInputActionValue& Value);
 
 	bool GetCursorGroundHit(FHitResult& OutHit) const;
 	AProspectorCharacter* GetProspector() const;
@@ -71,4 +90,9 @@ private:
 	// True while either Shift key is held - queues a command onto the Prospector's job queue
 	// instead of running it immediately.
 	bool IsShiftHeld() const;
+
+	// The currently selected unit, if any. Movement commands act on this directly instead of
+	// searching the world by class every time. Weak so a destroyed/invalidated unit clears itself
+	// automatically rather than leaving a dangling reference.
+	TWeakObjectPtr<AActor> SelectedUnit;
 };

@@ -7,6 +7,7 @@
 #include "AITypes.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "Voxel/GeoTypes.h"
+#include "SelectableUnit.h"
 #include "ProspectorCharacter.generated.h"
 
 class UStaticMeshComponent;
@@ -44,7 +45,7 @@ struct FProspectorJob
 // commands to it via the public Request* methods below. Carries dug sediment as a real
 // FSedimentPacket and pans it for gold via UPanningMinigameComponent.
 UCLASS()
-class DESTRUCTION_API AProspectorCharacter : public ACharacter
+class DESTRUCTION_API AProspectorCharacter : public ACharacter, public ISelectableUnit
 {
 	GENERATED_BODY()
 
@@ -57,6 +58,14 @@ protected:
 public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual")
 	TObjectPtr<UStaticMeshComponent> PlaceholderMesh;
+
+	// Flat disc shown beneath the unit while selected - the smallest reliable selection indicator.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> SelectionRingMesh;
+
+	// ISelectableUnit
+	virtual void SetSelected(bool bSelected) override;
+	virtual bool IsSelected() const override { return bIsSelected; }
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Panning")
 	TObjectPtr<UPanningMinigameComponent> PanningComponent;
@@ -116,6 +125,8 @@ public:
 	TArray<FProspectorJob> GetJobQueue() const { return JobQueue; }
 
 private:
+	bool bIsSelected = false;
+
 	UPROPERTY()
 	TObjectPtr<UGoldPanWidget> GoldPanWidgetInstance;
 

@@ -2,6 +2,7 @@
 
 #include "ProspectorPlayerController.h"
 #include "ProspectorCharacter.h"
+#include "SelectableUnit.h"
 #include "RTSCameraPawn.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -39,6 +40,8 @@ void AProspectorPlayerController::EnsureDefaultInputAssets()
 	MakeAction(DigCommandAction, EInputActionValueType::Boolean, TEXT("IA_DigCommand_Runtime"));
 	MakeAction(PanCommandAction, EInputActionValueType::Boolean, TEXT("IA_PanCommand_Runtime"));
 	MakeAction(PanTiltAction, EInputActionValueType::Axis2D, TEXT("IA_PanTilt_Runtime"));
+	MakeAction(SelectAction, EInputActionValueType::Boolean, TEXT("IA_SelectCommand_Runtime"));
+	MakeAction(DeselectAction, EInputActionValueType::Boolean, TEXT("IA_DeselectCommand_Runtime"));
 
 	if (DefaultMappingContext)
 	{
@@ -59,6 +62,8 @@ void AProspectorPlayerController::EnsureDefaultInputAssets()
 	IMC->MapKey(DigCommandAction, EKeys::E);
 	IMC->MapKey(PanCommandAction, EKeys::F);
 	IMC->MapKey(PanTiltAction, EKeys::Mouse2D);
+	IMC->MapKey(SelectAction, EKeys::LeftMouseButton);
+	IMC->MapKey(DeselectAction, EKeys::Escape);
 
 	DefaultMappingContext = IMC;
 }
@@ -118,6 +123,14 @@ void AProspectorPlayerController::SetupInputComponent()
 		{
 			EnhancedInputComponent->BindAction(PanTiltAction, ETriggerEvent::Triggered, this, &AProspectorPlayerController::DoPanTilt);
 		}
+		if (SelectAction)
+		{
+			EnhancedInputComponent->BindAction(SelectAction, ETriggerEvent::Started, this, &AProspectorPlayerController::DoSelectCommand);
+		}
+		if (DeselectAction)
+		{
+			EnhancedInputComponent->BindAction(DeselectAction, ETriggerEvent::Started, this, &AProspectorPlayerController::DoDeselectCommand);
+		}
 	}
 }
 
@@ -134,6 +147,37 @@ AProspectorCharacter* AProspectorPlayerController::GetProspector() const
 bool AProspectorPlayerController::IsShiftHeld() const
 {
 	return IsInputKeyDown(EKeys::LeftShift) || IsInputKeyDown(EKeys::RightShift);
+}
+
+void AProspectorPlayerController::SelectUnit(AActor* Unit)
+{
+	ISelectableUnit* Selectable = Cast<ISelectableUnit>(Unit);
+	if (!Selectable)
+	{
+		return;
+	}
+
+	if (SelectedUnit.Get() == Unit)
+	{
+		return;
+	}
+
+	DeselectCurrentUnit();
+
+	SelectedUnit = Unit;
+	Selectable->SetSelected(true);
+}
+
+void AProspectorPlayerController::DeselectCurrentUnit()
+{
+	if (AActor* Previous = SelectedUnit.Get())
+	{
+		if (ISelectableUnit* Selectable = Cast<ISelectableUnit>(Previous))
+		{
+			Selectable->SetSelected(false);
+		}
+	}
+	SelectedUnit = nullptr;
 }
 
 void AProspectorPlayerController::DoCameraPan(const FInputActionValue& Value)
@@ -155,22 +199,26 @@ void AProspectorPlayerController::DoCameraZoom(const FInputActionValue& Value)
 
 void AProspectorPlayerController::DoMoveCommand(const FInputActionValue& Value)
 {
+	// Right-click only issues a move order when a unit is actually selected.
+	AProspectorCharacter* Prospector = Cast<AProspectorCharacter>(SelectedUnit.Get());
+	if (!Prospector)
+	{
+		return;
+	}
+
 	FHitResult Hit;
 	const bool bHit = GetCursorGroundHit(Hit);
 
 	if (bHit)
 	{
-		if (AProspectorCharacter* Prospector = GetProspector())
+		if (IsShiftHeld())
 		{
-			if (IsShiftHeld())
-			{
-				Prospector->EnqueueMoveJob(Hit.Location);
-			}
-			else
-			{
-				Prospector->ClearJobQueue();
-				Prospector->RequestMoveTo(Hit.Location);
-			}
+			Prospector->EnqueueMoveJob(Hit.Location);
+		}
+		else
+		{
+			Prospector->ClearJobQueue();
+			Prospector->RequestMoveTo(Hit.Location);
 		}
 	}
 	else if (GEngine)
@@ -228,4 +276,24 @@ void AProspectorPlayerController::DoPanTilt(const FInputActionValue& Value)
 	{
 		Prospector->RequestPanTilt(Tilt);
 	}
+}
+
+void AProspectorPlayerController::DoSelectCommand(const FInputActionValue& Value)
+{
+	FHitResult Hit;
+	const bool bHit = GetHitResultUnderCursorByChannel(UEngineTypes::ConvertToTraceType(ECC_Pawn), false, Hit) && Hit.bBlockingHit;
+
+	if (bHit && Hit.GetActor() && Cast<ISelectableUnit>(Hit.GetActor()))
+	{
+		SelectUnit(Hit.GetActor());
+	}
+	else
+	{
+		DeselectCurrentUnit();
+	}
+}
+
+void AProspectorPlayerController::DoDeselectCommand(const FInputActionValue& Value)
+{
+	DeselectCurrentUnit();
 }
