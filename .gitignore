@@ -1,0 +1,28 @@
+# Unreal Engine generated/derived folders - never tracked
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+*.sln
+*.slnx
+
+# Per-IDE / per-machine cruft
+.vs/
+.vscode/
+.idea/
+*.VC.db
+*.VC.VC.opendb
+*.opensdf
+*.opendb
+*.sdf
+*.suo
+*.sln.docstates
+*.xcodeproj
+*.xcworkspace
+
+# Crash/error reports
+CrashReportClient/
+
+# Per-developer local Claude Code settings (permission allowlist etc.) - not shared
+.claude/settings.local.json
