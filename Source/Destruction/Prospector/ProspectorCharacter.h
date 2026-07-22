@@ -94,7 +94,9 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Inventory")
 	float TotalGoldGrams = 0.0f;
 
-	// Pathfinds to Destination via the navmesh (this unit's AIController).
+	// Plain (non-queued) move order: replaces any queued jobs and starts moving. Routed through the job
+	// queue so the move is tracked and a following shift+right-click appends a waypoint instead of
+	// interrupting it.
 	void RequestMoveTo(const FVector& Destination);
 
 	// Digs TargetActor (if it's a GravelBarSite within DigReach) at WorldLocation.
@@ -106,6 +108,15 @@ public:
 
 	// Feeds tilt input to the panning minigame while it's active; no-op otherwise.
 	void RequestPanTilt(FVector2D TiltValue);
+
+	// Manual (WASD) movement, forwarded from AProspectorPlayerController without possessing this pawn -
+	// AddMovementInput drives the CharacterMovement component directly while the AIController stays put.
+	// BeginManualMovement cancels any active AI order and queued jobs exactly once (on entry); callers
+	// invoke ApplyManualMovement every input tick and EndManualMovement when input stops.
+	void BeginManualMovement();
+	void ApplyManualMovement(const FVector& WorldDirection);
+	void EndManualMovement();
+	bool IsManualMovementActive() const { return bManualMovementActive; }
 
 	// Job queue: shift-commands append here instead of acting immediately. Each job runs to
 	// completion (move arrival, dig, or pan finishing) before the next one starts.
@@ -126,6 +137,11 @@ public:
 
 private:
 	bool bIsSelected = false;
+	bool bManualMovementActive = false;
+
+	// Request id of the move the current job is waiting on. HandleMoveCompleted only advances the queue
+	// for a completion matching this id, so a superseded/aborted move can't wrongly advance it.
+	FAIRequestID ActiveMoveRequestID = FAIRequestID::InvalidRequest;
 
 	UPROPERTY()
 	TObjectPtr<UGoldPanWidget> GoldPanWidgetInstance;
@@ -144,4 +160,9 @@ private:
 
 	void ProcessNextJob();
 	void ExecuteJob(const FProspectorJob& Job);
+
+	// Issues a navmesh move via the AIController and records ActiveMoveRequestID. Returns the request
+	// result so ExecuteJob can advance the queue itself when no async completion will follow
+	// (AlreadyAtGoal / Failed). No-ops (returns Failed) while the panning minigame is active.
+	EPathFollowingRequestResult::Type IssueMoveToLocation(const FVector& Destination);
 };

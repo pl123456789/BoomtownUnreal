@@ -46,4 +46,8 @@ public:
 
 	// Adjusts zoom by changing the spring arm length, clamped to [MinArmLength, MaxArmLength].
 	void ZoomBy(float Delta);
+
+	// Horizontal facing yaw of the view (actor yaw + boom yaw). Used to make selected-character WASD
+	// movement camera-relative; stays correct if the camera gains yaw rotation later (M0007).
+	float GetViewYaw() const;
 };

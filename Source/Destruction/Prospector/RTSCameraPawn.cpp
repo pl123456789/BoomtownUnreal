@@ -34,3 +34,8 @@ void ARTSCameraPawn::ZoomBy(float Delta)
 {
 	CameraBoom->TargetArmLength = FMath::Clamp(CameraBoom->TargetArmLength - Delta * ZoomStep, MinArmLength, MaxArmLength);
 }
+
+float ARTSCameraPawn::GetViewYaw() const
+{
+	return GetActorRotation().Yaw + CameraBoom->GetRelativeRotation().Yaw;
+}

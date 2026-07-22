@@ -102,6 +102,9 @@ void AProspectorPlayerController::SetupInputComponent()
 		if (CameraPanAction)
 		{
 			EnhancedInputComponent->BindAction(CameraPanAction, ETriggerEvent::Triggered, this, &AProspectorPlayerController::DoCameraPan);
+			// Completed fires once when every WASD key has been released, so manual character movement
+			// ends cleanly (Bill decelerates naturally) instead of leaving a stuck movement state.
+			EnhancedInputComponent->BindAction(CameraPanAction, ETriggerEvent::Completed, this, &AProspectorPlayerController::DoCameraPanReleased);
 		}
 		if (CameraZoomAction)
 		{
@@ -149,6 +152,11 @@ bool AProspectorPlayerController::IsShiftHeld() const
 	return IsInputKeyDown(EKeys::LeftShift) || IsInputKeyDown(EKeys::RightShift);
 }
 
+bool AProspectorPlayerController::IsAltHeld() const
+{
+	return IsInputKeyDown(EKeys::LeftAlt);
+}
+
 void AProspectorPlayerController::SelectUnit(AActor* Unit)
 {
 	ISelectableUnit* Selectable = Cast<ISelectableUnit>(Unit);
@@ -172,6 +180,11 @@ void AProspectorPlayerController::DeselectCurrentUnit()
 {
 	if (AActor* Previous = SelectedUnit.Get())
 	{
+		// End any manual WASD movement on the unit being deselected so it can't keep receiving input.
+		if (AProspectorCharacter* Prospector = Cast<AProspectorCharacter>(Previous))
+		{
+			Prospector->EndManualMovement();
+		}
 		if (ISelectableUnit* Selectable = Cast<ISelectableUnit>(Previous))
 		{
 			Selectable->SetSelected(false);
@@ -182,10 +195,49 @@ void AProspectorPlayerController::DeselectCurrentUnit()
 
 void AProspectorPlayerController::DoCameraPan(const FInputActionValue& Value)
 {
-	const FVector2D PanVector = Value.Get<FVector2D>();
-	if (ARTSCameraPawn* Cam = Cast<ARTSCameraPawn>(GetPawn()))
+	const FVector2D Input = Value.Get<FVector2D>();
+	ARTSCameraPawn* Cam = Cast<ARTSCameraPawn>(GetPawn());
+
+	// Left Alt held: WASD pans the RTS camera (unchanged M0004 behaviour). Any active manual character
+	// movement ends here so releasing Alt->character / pressing Alt->camera transitions cleanly.
+	if (IsAltHeld())
 	{
-		Cam->PanBy(PanVector, GetWorld()->GetDeltaSeconds());
+		if (AProspectorCharacter* Selected = Cast<AProspectorCharacter>(SelectedUnit.Get()))
+		{
+			Selected->EndManualMovement();
+		}
+		if (Cam)
+		{
+			Cam->PanBy(Input, GetWorld()->GetDeltaSeconds());
+		}
+		return;
+	}
+
+	// Alt not held: WASD drives the selected character, camera-relative. Nothing selected -> do nothing
+	// (the camera stays stationary).
+	AProspectorCharacter* Selected = Cast<AProspectorCharacter>(SelectedUnit.Get());
+	if (!Selected)
+	{
+		return;
+	}
+
+	const float ViewYaw = Cam ? Cam->GetViewYaw() : 0.0f;
+	const FRotator YawRotation(0.0f, ViewYaw, 0.0f);
+	const FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+	const FVector Right = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+	// Input.Y = forward/back, Input.X = right/left (same convention as camera pan). Normalize so a
+	// diagonal (two keys) isn't faster than a single axis. Forward/Right are already horizontal, so
+	// camera pitch never affects the direction.
+	const FVector WorldDirection = (Forward * Input.Y + Right * Input.X).GetSafeNormal();
+	Selected->ApplyManualMovement(WorldDirection);
+}
+
+void AProspectorPlayerController::DoCameraPanReleased(const FInputActionValue& Value)
+{
+	if (AProspectorCharacter* Selected = Cast<AProspectorCharacter>(SelectedUnit.Get()))
+	{
+		Selected->EndManualMovement();
 	}
 }
 
@@ -211,13 +263,18 @@ void AProspectorPlayerController::DoMoveCommand(const FInputActionValue& Value)
 
 	if (bHit)
 	{
+		// A move order always ends manual WASD control first, so the unit returns immediately to normal
+		// NavMesh pathfinding rather than fighting leftover manual input.
+		Prospector->EndManualMovement();
+
 		if (IsShiftHeld())
 		{
+			// Append a waypoint to the queue (starts moving if the unit was idle).
 			Prospector->EnqueueMoveJob(Hit.Location);
 		}
 		else
 		{
-			Prospector->ClearJobQueue();
+			// Replace the queue and move now (RequestMoveTo clears the queue internally).
 			Prospector->RequestMoveTo(Hit.Location);
 		}
 	}

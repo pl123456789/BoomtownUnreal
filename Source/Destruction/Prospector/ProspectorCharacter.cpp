@@ -9,7 +9,6 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "AIController.h"
-#include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
@@ -92,23 +91,45 @@ void AProspectorCharacter::BeginPlay()
 
 void AProspectorCharacter::RequestMoveTo(const FVector& Destination)
 {
+	// Replace the queue and start moving through it. ClearJobQueue empties any pending waypoints, then
+	// EnqueueMoveJob starts this one as the (tracked) head - so a following shift+right-click appends
+	// rather than interrupting, which a direct MoveToLocation call could not support.
+	ClearJobQueue();
+	EnqueueMoveJob(Destination);
+}
+
+EPathFollowingRequestResult::Type AProspectorCharacter::IssueMoveToLocation(const FVector& Destination)
+{
 	if (PanningComponent && PanningComponent->IsPanningActive())
 	{
-		return;
+		return EPathFollowingRequestResult::Failed;
 	}
 
-	if (AAIController* AIController = Cast<AAIController>(GetController()))
+	AAIController* AIController = Cast<AAIController>(GetController());
+	if (!AIController)
 	{
-		const EPathFollowingRequestResult::Type Result = AIController->MoveToLocation(Destination);
-		if (Result == EPathFollowingRequestResult::Failed)
+		return EPathFollowingRequestResult::Failed;
+	}
+
+	// Clear the tracked id BEFORE issuing: MoveToLocation aborts any in-flight move synchronously, which
+	// fires ReceiveMoveCompleted for the OLD request. With the id cleared, HandleMoveCompleted ignores
+	// that stale/aborted completion instead of advancing the queue against the wrong job.
+	ActiveMoveRequestID = FAIRequestID::InvalidRequest;
+
+	const EPathFollowingRequestResult::Type Result = AIController->MoveToLocation(Destination);
+	if (Result == EPathFollowingRequestResult::RequestSuccessful)
+	{
+		ActiveMoveRequestID = AIController->GetCurrentMoveRequestID();
+	}
+	else if (Result == EPathFollowingRequestResult::Failed)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("IssueMoveToLocation: MoveToLocation failed for destination %s"), *Destination.ToString());
+		if (GEngine)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("RequestMoveTo: MoveToLocation failed for destination %s"), *Destination.ToString());
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("Can't reach that spot."));
-			}
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("Can't reach that spot."));
 		}
 	}
+	return Result;
 }
 
 void AProspectorCharacter::RequestDigAt(AActor* TargetActor, const FVector& WorldLocation)
@@ -196,6 +217,53 @@ void AProspectorCharacter::RequestPanTilt(FVector2D TiltValue)
 	}
 }
 
+void AProspectorCharacter::BeginManualMovement()
+{
+	if (bManualMovementActive)
+	{
+		return;
+	}
+
+	bManualMovementActive = true;
+
+	// Take over from the AIController exactly once: drop any queued jobs/waypoints, THEN stop the current
+	// path-follow request. Order matters - StopMovement aborts the active move and fires HandleMoveCompleted
+	// synchronously; clearing the queue first means that callback sees an empty queue and no-ops, instead of
+	// advancing to (and issuing a move toward) the next queued waypoint. AddMovementInput then drives the
+	// movement component directly; the pawn is never possessed by the player - the AIController stays attached
+	// and resumes on the next move order.
+	ClearJobQueue();
+	if (AAIController* AIController = Cast<AAIController>(GetController()))
+	{
+		AIController->StopMovement();
+	}
+}
+
+void AProspectorCharacter::ApplyManualMovement(const FVector& WorldDirection)
+{
+	// WASD must never move the unit mid-pan; if a manual state was somehow active, end it safely.
+	if (PanningComponent && PanningComponent->IsPanningActive())
+	{
+		EndManualMovement();
+		return;
+	}
+
+	if (!bManualMovementActive)
+	{
+		BeginManualMovement();
+	}
+
+	AddMovementInput(WorldDirection, 1.0f);
+}
+
+void AProspectorCharacter::EndManualMovement()
+{
+	// Just clears the manual flag - the character decelerates naturally from CharacterMovement braking,
+	// or is immediately redirected if a new AI move order follows. The previously cancelled order is not
+	// resumed.
+	bManualMovementActive = false;
+}
+
 void AProspectorCharacter::HandlePanningFinished(bool bSuccess, float GoldBankedGrams, FSedimentPacket LostToTailings)
 {
 	TotalGoldGrams += GoldBankedGrams;
@@ -281,8 +349,25 @@ void AProspectorCharacter::ExecuteJob(const FProspectorJob& Job)
 	{
 	case EProspectorJobType::MoveTo:
 	case EProspectorJobType::Dig:
-		UAIBlueprintHelperLibrary::SimpleMoveToLocation(GetController(), Job.Location);
+	{
+		const bool bIsDig = (Job.Type == EProspectorJobType::Dig);
+		AActor* const DigTarget = Job.TargetActor.Get();
+		const FVector Destination = Job.Location;
+
+		const EPathFollowingRequestResult::Type Result = IssueMoveToLocation(Destination);
+		if (Result != EPathFollowingRequestResult::RequestSuccessful)
+		{
+			// No async move completion will follow (already at the goal, path failed, or blocked by
+			// panning), so advance the queue here. If a dig job was already at its spot, dig now.
+			if (bIsDig && Result == EPathFollowingRequestResult::AlreadyAtGoal)
+			{
+				RequestDigAt(DigTarget, Destination);
+			}
+			JobQueue.RemoveAt(0);
+			ProcessNextJob();
+		}
 		break;
+	}
 
 	case EProspectorJobType::Pan:
 		if (!RequestPan())
@@ -299,6 +384,14 @@ void AProspectorCharacter::ExecuteJob(const FProspectorJob& Job)
 void AProspectorCharacter::HandleMoveCompleted(FAIRequestID RequestID, EPathFollowingResult::Type Result)
 {
 	if (JobQueue.Num() == 0)
+	{
+		return;
+	}
+
+	// Only the current job's own move advances the queue. A completion from a superseded/aborted move
+	// (e.g. a plain right-click replaced an in-flight queued move) carries a different request id and is
+	// ignored, so it can't consume the wrong job.
+	if (!RequestID.IsEquivalent(ActiveMoveRequestID))
 	{
 		return;
 	}

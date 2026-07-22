@@ -76,6 +76,7 @@ private:
 	void EnsureDefaultInputAssets();
 
 	void DoCameraPan(const FInputActionValue& Value);
+	void DoCameraPanReleased(const FInputActionValue& Value);
 	void DoCameraZoom(const FInputActionValue& Value);
 	void DoMoveCommand(const FInputActionValue& Value);
 	void DoDigCommand(const FInputActionValue& Value);
@@ -90,6 +91,9 @@ private:
 	// True while either Shift key is held - queues a command onto the Prospector's job queue
 	// instead of running it immediately.
 	bool IsShiftHeld() const;
+
+	// True while Left Alt is held - routes WASD to RTS camera panning instead of character movement.
+	bool IsAltHeld() const;
 
 	// The currently selected unit, if any. Movement commands act on this directly instead of
 	// searching the world by class every time. Weak so a destroyed/invalidated unit clears itself
