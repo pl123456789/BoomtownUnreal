@@ -50,4 +50,23 @@ public:
 	// Horizontal facing yaw of the view (actor yaw + boom yaw). Used to make selected-character WASD
 	// movement camera-relative; stays correct if the camera gains yaw rotation later (M0007).
 	float GetViewYaw() const;
+
+	virtual void Tick(float DeltaTime) override;
+
+	// Moves the camera's X/Y to Target's X/Y immediately (no interpolation). Z, zoom, pitch and yaw are
+	// left untouched; Target itself is never moved.
+	void CenterOnActor(const AActor* Target);
+
+	// Centers on Target immediately, then ticks every frame to keep matching its X/Y until stopped.
+	void BeginFollowingActor(AActor* Target);
+
+	// Stops following, if active, and disables ticking. Safe to call even when not currently following.
+	void StopFollowingActor();
+
+	bool IsFollowingActor() const { return FollowTarget.IsValid(); }
+
+private:
+	// Weak so a destroyed/invalidated target clears itself - Tick() detects this and stops following on
+	// its own, leaving the camera exactly where it was (no world-scan, no auto-reselect).
+	TWeakObjectPtr<AActor> FollowTarget;
 };

@@ -60,6 +60,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> TabCycleAction;
 
+	// C: toggle center-on and continuous follow of the selected unit.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> CenterFollowAction;
+
 	// Selects Unit if it implements ISelectableUnit; no-ops (and does not deselect) otherwise.
 	void SelectUnit(AActor* Unit);
 
@@ -89,6 +93,7 @@ private:
 	void DoSelectCommand(const FInputActionValue& Value);
 	void DoDeselectCommand(const FInputActionValue& Value);
 	void DoTabCycleCommand(const FInputActionValue& Value);
+	void DoCenterFollowCommand(const FInputActionValue& Value);
 
 	bool GetCursorGroundHit(FHitResult& OutHit) const;
 

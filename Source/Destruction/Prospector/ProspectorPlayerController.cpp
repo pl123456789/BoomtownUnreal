@@ -43,6 +43,7 @@ void AProspectorPlayerController::EnsureDefaultInputAssets()
 	MakeAction(SelectAction, EInputActionValueType::Boolean, TEXT("IA_SelectCommand_Runtime"));
 	MakeAction(DeselectAction, EInputActionValueType::Boolean, TEXT("IA_DeselectCommand_Runtime"));
 	MakeAction(TabCycleAction, EInputActionValueType::Boolean, TEXT("IA_TabCycleCommand_Runtime"));
+	MakeAction(CenterFollowAction, EInputActionValueType::Boolean, TEXT("IA_CenterFollow_Runtime"));
 
 	if (DefaultMappingContext)
 	{
@@ -66,6 +67,7 @@ void AProspectorPlayerController::EnsureDefaultInputAssets()
 	IMC->MapKey(SelectAction, EKeys::LeftMouseButton);
 	IMC->MapKey(DeselectAction, EKeys::Escape);
 	IMC->MapKey(TabCycleAction, EKeys::Tab);
+	IMC->MapKey(CenterFollowAction, EKeys::C);
 
 	DefaultMappingContext = IMC;
 }
@@ -142,6 +144,11 @@ void AProspectorPlayerController::SetupInputComponent()
 			// advances exactly one unit.
 			EnhancedInputComponent->BindAction(TabCycleAction, ETriggerEvent::Started, this, &AProspectorPlayerController::DoTabCycleCommand);
 		}
+		if (CenterFollowAction)
+		{
+			// Started so one keypress toggles once; holding C must not repeatedly toggle.
+			EnhancedInputComponent->BindAction(CenterFollowAction, ETriggerEvent::Started, this, &AProspectorPlayerController::DoCenterFollowCommand);
+		}
 	}
 }
 
@@ -173,10 +180,20 @@ void AProspectorPlayerController::SelectUnit(AActor* Unit)
 		return;
 	}
 
+	// Capture follow state before DeselectCurrentUnit stops it, so an actual selection switch (Tab or
+	// clicking another unit) transfers follow to the new unit instead of just losing it.
+	ARTSCameraPawn* Cam = Cast<ARTSCameraPawn>(GetPawn());
+	const bool bWasFollowing = Cam && Cam->IsFollowingActor();
+
 	DeselectCurrentUnit();
 
 	SelectedUnit = Unit;
 	Selectable->SetSelected(true);
+
+	if (bWasFollowing && Cam)
+	{
+		Cam->BeginFollowingActor(Unit);
+	}
 }
 
 void AProspectorPlayerController::DeselectCurrentUnit()
@@ -194,6 +211,13 @@ void AProspectorPlayerController::DeselectCurrentUnit()
 		}
 	}
 	SelectedUnit = nullptr;
+
+	// Clearing the selection always stops follow - SelectUnit re-enables it afterward if this was an
+	// actual switch rather than a real deselect. Safe to call even when not currently following.
+	if (ARTSCameraPawn* Cam = Cast<ARTSCameraPawn>(GetPawn()))
+	{
+		Cam->StopFollowingActor();
+	}
 }
 
 void AProspectorPlayerController::DoCameraPan(const FInputActionValue& Value)
@@ -211,6 +235,9 @@ void AProspectorPlayerController::DoCameraPan(const FInputActionValue& Value)
 		}
 		if (Cam)
 		{
+			// Manual camera control always wins over follow - stop it (idempotent) before panning, and
+			// leave the camera free until C is pressed again.
+			Cam->StopFollowingActor();
 			Cam->PanBy(Input, GetWorld()->GetDeltaSeconds());
 		}
 		return;
@@ -399,6 +426,30 @@ void AProspectorPlayerController::DoTabCycleCommand(const FInputActionValue& Val
 
 	// SelectUnit no-ops if this is already the selected actor (single-unit case: Tab keeps Bill selected,
 	// no flicker), and otherwise reuses the normal deselect-then-select cleanup (ends manual movement on
-	// the outgoing unit, toggles the visual state on both).
+	// the outgoing unit, toggles the visual state on both, and transfers follow if it was active).
 	SelectUnit(SelectableActors[NextIndex]);
+}
+
+void AProspectorPlayerController::DoCenterFollowCommand(const FInputActionValue& Value)
+{
+	AActor* Selected = SelectedUnit.Get();
+	if (!Selected)
+	{
+		return;
+	}
+
+	ARTSCameraPawn* Cam = Cast<ARTSCameraPawn>(GetPawn());
+	if (!Cam)
+	{
+		return;
+	}
+
+	if (Cam->IsFollowingActor())
+	{
+		Cam->StopFollowingActor();
+	}
+	else
+	{
+		Cam->BeginFollowingActor(Selected);
+	}
 }
