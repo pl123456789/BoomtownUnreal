@@ -2,6 +2,7 @@
 
 #include "ProspectorPlayerController.h"
 #include "ProspectorCharacter.h"
+#include "PanningMinigameComponent.h"
 #include "SelectableUnit.h"
 #include "RTSCameraPawn.h"
 #include "EnhancedInputComponent.h"
@@ -44,6 +45,7 @@ void AProspectorPlayerController::EnsureDefaultInputAssets()
 	MakeAction(DeselectAction, EInputActionValueType::Boolean, TEXT("IA_DeselectCommand_Runtime"));
 	MakeAction(TabCycleAction, EInputActionValueType::Boolean, TEXT("IA_TabCycleCommand_Runtime"));
 	MakeAction(CenterFollowAction, EInputActionValueType::Boolean, TEXT("IA_CenterFollow_Runtime"));
+	MakeAction(CameraOrbitAction, EInputActionValueType::Boolean, TEXT("IA_CameraOrbit_Runtime"));
 
 	if (DefaultMappingContext)
 	{
@@ -68,6 +70,7 @@ void AProspectorPlayerController::EnsureDefaultInputAssets()
 	IMC->MapKey(DeselectAction, EKeys::Escape);
 	IMC->MapKey(TabCycleAction, EKeys::Tab);
 	IMC->MapKey(CenterFollowAction, EKeys::C);
+	IMC->MapKey(CameraOrbitAction, EKeys::MiddleMouseButton);
 
 	DefaultMappingContext = IMC;
 }
@@ -149,6 +152,12 @@ void AProspectorPlayerController::SetupInputComponent()
 			// Started so one keypress toggles once; holding C must not repeatedly toggle.
 			EnhancedInputComponent->BindAction(CenterFollowAction, ETriggerEvent::Started, this, &AProspectorPlayerController::DoCenterFollowCommand);
 		}
+		if (CameraOrbitAction)
+		{
+			EnhancedInputComponent->BindAction(CameraOrbitAction, ETriggerEvent::Started, this, &AProspectorPlayerController::DoCameraOrbitStarted);
+			EnhancedInputComponent->BindAction(CameraOrbitAction, ETriggerEvent::Completed, this, &AProspectorPlayerController::DoCameraOrbitEnded);
+			EnhancedInputComponent->BindAction(CameraOrbitAction, ETriggerEvent::Canceled, this, &AProspectorPlayerController::DoCameraOrbitEnded);
+		}
 	}
 }
 
@@ -211,6 +220,7 @@ void AProspectorPlayerController::DeselectCurrentUnit()
 		}
 	}
 	SelectedUnit = nullptr;
+	bManualMoveReferenceValid = false;
 
 	// Clearing the selection always stops follow - SelectUnit re-enables it afterward if this was an
 	// actual switch rather than a real deselect. Safe to call even when not currently following.
@@ -233,6 +243,7 @@ void AProspectorPlayerController::DoCameraPan(const FInputActionValue& Value)
 		{
 			Selected->EndManualMovement();
 		}
+		bManualMoveReferenceValid = false;
 		if (Cam)
 		{
 			// Manual camera control always wins over follow - stop it (idempotent) before panning, and
@@ -243,28 +254,56 @@ void AProspectorPlayerController::DoCameraPan(const FInputActionValue& Value)
 		return;
 	}
 
-	// Alt not held: WASD drives the selected character, camera-relative. Nothing selected -> do nothing
-	// (the camera stays stationary).
+	// Alt not held: WASD drives the selected character. Nothing selected -> do nothing (the camera
+	// stays stationary).
 	AProspectorCharacter* Selected = Cast<AProspectorCharacter>(SelectedUnit.Get());
 	if (!Selected)
+	{
+		bManualMoveReferenceValid = false;
+		return;
+	}
+
+	// A right-click order that interrupted a held WASD session requires those keys to be fully released
+	// (cleared in DoCameraPanReleased once the combined input truly returns to zero) before manual
+	// movement can resume - otherwise it would immediately steal control back from the AI path on the
+	// very next Triggered event. Camera panning (the Alt-held branch above) is unaffected.
+	if (bManualMovementRequiresRelease)
 	{
 		return;
 	}
 
-	const float ViewYaw = Cam ? Cam->GetViewYaw() : 0.0f;
-	const FRotator YawRotation(0.0f, ViewYaw, 0.0f);
+	// Capture the movement-relative basis once, on the first WASD input of this movement session, and
+	// hold it fixed until manual movement ends - so orbiting the camera mid-move doesn't steer the unit
+	// off its current heading. Not recaptured every frame, and not affected by middle-mouse orbit state.
+	if (!bManualMoveReferenceValid)
+	{
+		ManualMoveReferenceYaw = Cam ? Cam->GetViewYaw() : 0.0f;
+		bManualMoveReferenceValid = true;
+	}
+
+	const FRotator YawRotation(0.0f, ManualMoveReferenceYaw, 0.0f);
 	const FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 	const FVector Right = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
 	// Input.Y = forward/back, Input.X = right/left (same convention as camera pan). Normalize so a
-	// diagonal (two keys) isn't faster than a single axis. Forward/Right are already horizontal, so
-	// camera pitch never affects the direction.
+	// diagonal (two keys) isn't faster than a single axis.
 	const FVector WorldDirection = (Forward * Input.Y + Right * Input.X).GetSafeNormal();
 	Selected->ApplyManualMovement(WorldDirection);
+
+	if (!Selected->IsManualMovementActive())
+	{
+		// ApplyManualMovement declined to (re)start manual movement (e.g. the panning minigame became
+		// active) - clear the reference so a later, genuinely new movement session captures a fresh yaw.
+		bManualMoveReferenceValid = false;
+	}
 }
 
 void AProspectorPlayerController::DoCameraPanReleased(const FInputActionValue& Value)
 {
+	// Fires once the combined WASD input truly returns to zero (all keys released) - the only point
+	// that safely re-arms manual movement after a right-click order interrupted a held session.
+	bManualMoveReferenceValid = false;
+	bManualMovementRequiresRelease = false;
 	if (AProspectorCharacter* Selected = Cast<AProspectorCharacter>(SelectedUnit.Get()))
 	{
 		Selected->EndManualMovement();
@@ -294,8 +333,17 @@ void AProspectorPlayerController::DoMoveCommand(const FInputActionValue& Value)
 	if (bHit)
 	{
 		// A move order always ends manual WASD control first, so the unit returns immediately to normal
-		// NavMesh pathfinding rather than fighting leftover manual input.
+		// NavMesh pathfinding rather than fighting leftover manual input. If a WASD session was actually
+		// active, require those keys to be fully released before manual movement can resume - otherwise
+		// physically-held keys would immediately restart it on the very next input tick and steal
+		// control back from the AI path this order just issued.
+		const bool bWasManuallyMoving = Prospector->IsManualMovementActive();
 		Prospector->EndManualMovement();
+		bManualMoveReferenceValid = false;
+		if (bWasManuallyMoving)
+		{
+			bManualMovementRequiresRelease = true;
+		}
 
 		if (IsShiftHeld())
 		{
@@ -367,12 +415,48 @@ void AProspectorPlayerController::DoPanCommand(const FInputActionValue& Value)
 
 void AProspectorPlayerController::DoPanTilt(const FInputActionValue& Value)
 {
-	// Mouse pan-tilt input only ever reaches the selected unit - see DoDigCommand.
-	const FVector2D Tilt = Value.Get<FVector2D>();
-	if (AProspectorCharacter* Prospector = Cast<AProspectorCharacter>(SelectedUnit.Get()))
+	const FVector2D Delta = Value.Get<FVector2D>();
+	AProspectorCharacter* Prospector = Cast<AProspectorCharacter>(SelectedUnit.Get());
+
+	// The gold-panning minigame always has priority over camera orbit for this shared Mouse2D input.
+	// Checked every move (not just when panning starts) so it's caught immediately regardless of how
+	// panning became active - including orbit already being held when F starts a pan mid-drag.
+	const bool bPanningActive = Prospector && Prospector->PanningComponent && Prospector->PanningComponent->IsPanningActive();
+	if (bPanningActive)
 	{
-		Prospector->RequestPanTilt(Tilt);
+		bCameraOrbitActive = false;
+		Prospector->RequestPanTilt(Delta);
+		return;
 	}
+
+	if (bCameraOrbitActive)
+	{
+		if (ARTSCameraPawn* Cam = Cast<ARTSCameraPawn>(GetPawn()))
+		{
+			Cam->OrbitBy(Delta);
+		}
+	}
+}
+
+void AProspectorPlayerController::DoCameraOrbitStarted(const FInputActionValue& Value)
+{
+	// Starting orbit never succeeds while the selected unit's panning minigame is active - panning
+	// keeps exclusive use of Mouse2D. Does not alter selection, stop worker movement, or disable follow.
+	AProspectorCharacter* Prospector = Cast<AProspectorCharacter>(SelectedUnit.Get());
+	const bool bPanningActive = Prospector && Prospector->PanningComponent && Prospector->PanningComponent->IsPanningActive();
+	if (bPanningActive)
+	{
+		return;
+	}
+
+	bCameraOrbitActive = true;
+}
+
+void AProspectorPlayerController::DoCameraOrbitEnded(const FInputActionValue& Value)
+{
+	// Safe to call even if orbit was never active (e.g. it was already cleared by DoPanTilt because
+	// panning became active mid-drag). Never touches camera rotation or follow state.
+	bCameraOrbitActive = false;
 }
 
 void AProspectorPlayerController::DoSelectCommand(const FInputActionValue& Value)

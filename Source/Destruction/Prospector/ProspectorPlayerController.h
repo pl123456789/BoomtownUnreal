@@ -64,6 +64,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> CenterFollowAction;
 
+	// Middle mouse: hold and move the mouse to orbit the RTS camera (yaw/pitch) around its current
+	// focal point, or around the followed unit if C-follow is active.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> CameraOrbitAction;
+
 	// Selects Unit if it implements ISelectableUnit; no-ops (and does not deselect) otherwise.
 	void SelectUnit(AActor* Unit);
 
@@ -94,6 +99,8 @@ private:
 	void DoDeselectCommand(const FInputActionValue& Value);
 	void DoTabCycleCommand(const FInputActionValue& Value);
 	void DoCenterFollowCommand(const FInputActionValue& Value);
+	void DoCameraOrbitStarted(const FInputActionValue& Value);
+	void DoCameraOrbitEnded(const FInputActionValue& Value);
 
 	bool GetCursorGroundHit(FHitResult& OutHit) const;
 
@@ -108,4 +115,24 @@ private:
 	// searching the world by class every time. Weak so a destroyed/invalidated unit clears itself
 	// automatically rather than leaving a dangling reference.
 	TWeakObjectPtr<AActor> SelectedUnit;
+
+	// True while middle mouse is held and orbiting is permitted (the panning minigame wasn't active
+	// when it started). Routes Mouse2D to camera orbit instead of the panning minigame while true - the
+	// panning minigame always takes priority regardless of this flag; see DoPanTilt.
+	bool bCameraOrbitActive = false;
+
+	// Movement-relative basis captured once at the start of a manual-WASD movement session (the first
+	// non-zero input after manual movement wasn't already active) and held fixed until that session
+	// ends, so orbiting the camera mid-move doesn't change the selected unit's current heading. Cleared
+	// on release, a right-click order, Alt+WASD, deselection/selection change, or the panning minigame
+	// preventing movement - see DoCameraPan, DoCameraPanReleased, DoMoveCommand, DeselectCurrentUnit.
+	bool bManualMoveReferenceValid = false;
+	float ManualMoveReferenceYaw = 0.0f;
+
+	// True after a right-click order interrupts a manual-WASD session that was actually active, until
+	// all WASD input is fully released (cleared in DoCameraPanReleased on ETriggerEvent::Completed, i.e.
+	// once the combined input truly returns to zero - not merely because selection changes). Prevents
+	// currently-held keys from immediately restarting manual movement and stealing control back from
+	// the AI path on the very next input tick; see DoCameraPan and DoMoveCommand.
+	bool bManualMovementRequiresRelease = false;
 };

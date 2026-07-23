@@ -66,36 +66,39 @@ void ARTSCameraPawn::CenterOnActor(const AActor* Target)
 		return;
 	}
 
-	FVector NewLocation = GetActorLocation();
-	const FVector TargetLocation = Target->GetActorLocation();
+	// The followed unit is the actual orbit pivot: the camera pawn's root is placed exactly at Target's
+	// world location (X, Y AND Z - superseding M0009A's Z-preserving, ray-intersection approach, which
+	// only kept Target centered for a fixed pitch. Under variable pitch that approach let the true
+	// camera-to-target distance drift away from TargetArmLength, shrinking the unit at shallow pitch even
+	// though the arm length itself never changed). Since USpringArmComponent computes the camera position
+	// as Cam = RootPos - Forward*TargetArmLength and looks along +Forward toward RootPos, placing RootPos
+	// exactly on Target puts Target trivially on the center ray at exactly TargetArmLength from the
+	// camera, for any pitch or yaw - centered and at consistent apparent size with no ray math needed.
+	SetActorLocation(Target->GetActorLocation());
+}
 
-	// The boom is pitched downward, so the camera's center ray - which passes through this pawn's root
-	// position offset backward by TargetArmLength along Forward, per USpringArmComponent's own
-	// DesiredLoc -= Forward * TargetArmLength - only intersects a target at the SAME Z as this pawn's
-	// root. Naively copying Target's X/Y onto the root's X/Y (the old approach) is therefore only exact
-	// when TargetLocation.Z == NewLocation.Z, which is false in general (a standing character capsule
-	// sits well above this pawn's root height): solve instead for the root X/Y that puts Target exactly
-	// on the ray. Parametrizing the ray as (RootPos - Forward*L) + t*Forward and requiring its Z to match
-	// TargetLocation.Z gives (t - L) = (TargetLocation.Z - RootPos.Z) / Forward.Z; substituting into the
-	// ray's X/Y makes the L terms cancel out entirely, so this correction is identical at every zoom
-	// level - exactly why the old drift was more or less visible depending on zoom rather than caused by
-	// it, and why this fix holds at minimum, maximum and intermediate arm lengths alike.
-	const FVector Forward = CameraBoom->GetComponentRotation().Vector();
-	if (!FMath::IsNearlyZero(Forward.Z, 0.0001f))
-	{
-		const float K = (TargetLocation.Z - NewLocation.Z) / Forward.Z;
-		NewLocation.X = TargetLocation.X - Forward.X * K;
-		NewLocation.Y = TargetLocation.Y - Forward.Y * K;
-	}
-	else
-	{
-		// Near-horizontal look direction - not reachable with this camera's fixed -55 degree pitch, but
-		// guarded in case pitch ever changes, rather than dividing by a near-zero Forward.Z.
-		NewLocation.X = TargetLocation.X;
-		NewLocation.Y = TargetLocation.Y;
-	}
+void ARTSCameraPawn::OrbitBy(const FVector2D& MouseDelta)
+{
+	FRotator BoomRotation = CameraBoom->GetRelativeRotation();
 
-	SetActorLocation(NewLocation);
+	// Yaw: moving the mouse right increases yaw, rotating the view right (standard UE rotator
+	// convention: increasing yaw turns clockwise viewed from above). Wraps continuously - never clamped.
+	BoomRotation.Yaw = FRotator::NormalizeAxis(BoomRotation.Yaw + MouseDelta.X * OrbitYawSpeed);
+
+	// Pitch: raw Mouse2D.Y follows screen-space convention (moving the mouse up reports a negative raw
+	// delta), so it's negated here to make "mouse up" increase pitch toward the shallower MaxPitch and
+	// "mouse down" decrease it toward the steeper MinPitch, per the milestone's specified feel. If this
+	// reads as inverted once tested live, flipping the sign of OrbitPitchSpeed alone corrects it.
+	BoomRotation.Pitch = FMath::Clamp(BoomRotation.Pitch - MouseDelta.Y * OrbitPitchSpeed, MinPitch, MaxPitch);
+
+	BoomRotation.Roll = 0.0f;
+
+	CameraBoom->SetRelativeRotation(BoomRotation);
+
+	if (AActor* Target = FollowTarget.Get())
+	{
+		CenterOnActor(Target);
+	}
 }
 
 void ARTSCameraPawn::BeginFollowingActor(AActor* Target)
