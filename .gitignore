@@ -26,3 +26,8 @@ CrashReportClient/
 
 # Per-developer local Claude Code settings (permission allowlist etc.) - not shared
 .claude/settings.local.json
+
+# Boomtown packaged Alpha builds - never tracked, even if produced inside the repo by accident
+/Boomtown_Alpha_*_Windows/
+/Boomtown_Alpha_*_Windows.zip
+/Boomtown_Alpha_*_PackageLog.txt
