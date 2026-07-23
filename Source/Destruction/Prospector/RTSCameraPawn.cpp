@@ -68,8 +68,33 @@ void ARTSCameraPawn::CenterOnActor(const AActor* Target)
 
 	FVector NewLocation = GetActorLocation();
 	const FVector TargetLocation = Target->GetActorLocation();
-	NewLocation.X = TargetLocation.X;
-	NewLocation.Y = TargetLocation.Y;
+
+	// The boom is pitched downward, so the camera's center ray - which passes through this pawn's root
+	// position offset backward by TargetArmLength along Forward, per USpringArmComponent's own
+	// DesiredLoc -= Forward * TargetArmLength - only intersects a target at the SAME Z as this pawn's
+	// root. Naively copying Target's X/Y onto the root's X/Y (the old approach) is therefore only exact
+	// when TargetLocation.Z == NewLocation.Z, which is false in general (a standing character capsule
+	// sits well above this pawn's root height): solve instead for the root X/Y that puts Target exactly
+	// on the ray. Parametrizing the ray as (RootPos - Forward*L) + t*Forward and requiring its Z to match
+	// TargetLocation.Z gives (t - L) = (TargetLocation.Z - RootPos.Z) / Forward.Z; substituting into the
+	// ray's X/Y makes the L terms cancel out entirely, so this correction is identical at every zoom
+	// level - exactly why the old drift was more or less visible depending on zoom rather than caused by
+	// it, and why this fix holds at minimum, maximum and intermediate arm lengths alike.
+	const FVector Forward = CameraBoom->GetComponentRotation().Vector();
+	if (!FMath::IsNearlyZero(Forward.Z, 0.0001f))
+	{
+		const float K = (TargetLocation.Z - NewLocation.Z) / Forward.Z;
+		NewLocation.X = TargetLocation.X - Forward.X * K;
+		NewLocation.Y = TargetLocation.Y - Forward.Y * K;
+	}
+	else
+	{
+		// Near-horizontal look direction - not reachable with this camera's fixed -55 degree pitch, but
+		// guarded in case pitch ever changes, rather than dividing by a near-zero Forward.Z.
+		NewLocation.X = TargetLocation.X;
+		NewLocation.Y = TargetLocation.Y;
+	}
+
 	SetActorLocation(NewLocation);
 }
 
