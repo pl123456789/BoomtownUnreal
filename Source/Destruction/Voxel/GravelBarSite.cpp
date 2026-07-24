@@ -2,8 +2,7 @@
 
 #include "GravelBarSite.h"
 #include "DensityChunkComponent.h"
-#include "Terrain/OverworldHeightfield.h"
-#include "Kismet/GameplayStatics.h"
+#include "Terrain/TerrainSurfaceQuery.h"
 #include "Engine/Engine.h"
 
 AGravelBarSite::AGravelBarSite()
@@ -25,22 +24,23 @@ void AGravelBarSite::BeginPlay()
 
 void AGravelBarSite::PlaceNearRiver()
 {
-	AOverworldHeightfield* Overworld = Cast<AOverworldHeightfield>(UGameplayStatics::GetActorOfClass(GetWorld(), AOverworldHeightfield::StaticClass()));
-	if (!Overworld)
+	// XY comes from wherever the game mode spawned this actor - only Z is resolved here, snapping
+	// to whichever terrain is actually providing collision at that XY.
+	const FVector SpawnXY = GetActorLocation();
+
+	float SurfaceZ;
+	if (!FTerrainSurfaceQuery::TraceGroundZ(GetWorld(), SpawnXY.X, SpawnXY.Y, SurfaceZ))
 	{
 		return;
 	}
 
-	const FVector2D RiverXY = Overworld->FindLowestPointWorldXY();
-	const float SurfaceZ = Overworld->GetSurfaceHeightAtWorldXY(RiverXY);
-
-	// Bottom-back corner of the box sits at RiverXY (centered on the river point), with enough
-	// headroom above the sampled surface for the real terrain to vary a bit across the footprint
-	// without running off the top or bottom of the density grid.
+	// Bottom-back corner of the box sits at the spawn XY (centered on it), with enough headroom
+	// above the sampled surface for the real terrain to vary a bit across the footprint without
+	// running off the top or bottom of the density grid.
 	const float HeadroomAboveSurface = 100.0f;
 	const FVector NewLocation(
-		RiverXY.X - SiteSize.X * 0.5f,
-		RiverXY.Y - SiteSize.Y * 0.5f,
+		SpawnXY.X - SiteSize.X * 0.5f,
+		SpawnXY.Y - SiteSize.Y * 0.5f,
 		SurfaceZ - (SiteSize.Z - HeadroomAboveSurface));
 
 	SetActorLocation(NewLocation);
@@ -54,8 +54,6 @@ void AGravelBarSite::PlaceNearRiver()
 
 void AGravelBarSite::GenerateGeology()
 {
-	AOverworldHeightfield* Overworld = Cast<AOverworldHeightfield>(UGameplayStatics::GetActorOfClass(GetWorld(), AOverworldHeightfield::StaticClass()));
-
 	const int32 NX = FMath::Max(2, FMath::RoundToInt(SiteSize.X / VoxelResolution) + 1);
 	const int32 NY = FMath::Max(2, FMath::RoundToInt(SiteSize.Y / VoxelResolution) + 1);
 	const int32 NZ = FMath::Max(2, FMath::RoundToInt(SiteSize.Z / VoxelResolution) + 1);
@@ -84,7 +82,12 @@ void AGravelBarSite::GenerateGeology()
 		{
 			const int32 ColumnIdx = X + Y * NX;
 			const FVector WorldXY = ActorLoc + FVector(X * VoxelResolution, Y * VoxelResolution, 0.0f);
-			const float SurfaceWorldZ = Overworld ? Overworld->GetSurfaceHeightAtWorldXY(FVector2D(WorldXY.X, WorldXY.Y)) : ActorLoc.Z + SiteSize.Z * 0.5f;
+
+			float SurfaceWorldZ;
+			if (!FTerrainSurfaceQuery::TraceGroundZ(GetWorld(), WorldXY.X, WorldXY.Y, SurfaceWorldZ))
+			{
+				SurfaceWorldZ = ActorLoc.Z + SiteSize.Z * 0.5f;
+			}
 
 			float SurfaceLocalZ = SurfaceWorldZ - ActorLoc.Z;
 			SurfaceLocalZ = FMath::Clamp(SurfaceLocalZ, BedrockDepth + VoxelResolution, SiteSize.Z - VoxelResolution);

@@ -8,14 +8,15 @@
 #include "GravelBarSite.generated.h"
 
 class UDensityChunkComponent;
-class AOverworldHeightfield;
 
-// The one diggable pocket in this first prototype: a small smooth-voxel volume placed at the real
-// river (the DEM heightmap's lowest point) via AOverworldHeightfield::FindLowestPointWorldXY(), with
-// layered geology (bedrock -> gravel -> sand -> topsoil) and gold concentration weighted toward
-// bedrock plus a couple of hand-placed pay-streak pockets. Its surface height at every column is
-// sampled directly from AOverworldHeightfield::GetSurfaceHeightAtWorldXY() so it blends into the
-// surrounding terrain without a seam.
+// The one diggable pocket in this prototype: a small smooth-voxel volume with layered geology
+// (bedrock -> gravel -> sand -> topsoil) and gold concentration weighted toward bedrock plus a
+// couple of hand-placed pay-streak pockets. Its own XY placement comes from wherever the game
+// mode spawns it (see ADestructionGameMode); PlaceNearRiver() snaps its Z to the traced ground
+// surface at that XY via FTerrainSurfaceQuery, and every column's surface height in
+// GenerateGeology() is sampled the same way, so it blends into whichever terrain is actually
+// present (the persistent Landscape, or the rollback AOverworldHeightfield) without a seam - with
+// no direct dependency on either terrain class.
 UCLASS()
 class DESTRUCTION_API AGravelBarSite : public AActor
 {

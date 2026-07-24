@@ -5,6 +5,7 @@
 #include "Prospector/ProspectorPlayerController.h"
 #include "Prospector/RTSCameraPawn.h"
 #include "Terrain/OverworldHeightfield.h"
+#include "Terrain/TerrainSurfaceQuery.h"
 #include "Voxel/GravelBarSite.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
@@ -24,15 +25,26 @@ void ADestructionGameMode::BeginPlay()
 	Super::BeginPlay();
 
 	AOverworldHeightfield* Overworld = Cast<AOverworldHeightfield>(UGameplayStatics::GetActorOfClass(GetWorld(), AOverworldHeightfield::StaticClass()));
-	if (!Overworld)
+	if (!Overworld && bSpawnRuntimeHeightfield)
 	{
 		Overworld = GetWorld()->SpawnActor<AOverworldHeightfield>(OverworldClass ? *OverworldClass : AOverworldHeightfield::StaticClass(), FTransform::Identity);
 	}
 
+	// Place near the player start (offset so it doesn't overlap Bill's own spawn point) rather than
+	// at the world origin - with the persistent Landscape as the normal terrain, the origin may be
+	// nowhere near the actual playable area. GravelBarSite snaps its own Z to the traced ground
+	// surface in PlaceNearRiver(), so only the XY placement matters here.
 	AGravelBarSite* GravelSite = Cast<AGravelBarSite>(UGameplayStatics::GetActorOfClass(GetWorld(), AGravelBarSite::StaticClass()));
 	if (!GravelSite)
 	{
-		GravelSite = GetWorld()->SpawnActor<AGravelBarSite>(GravelBarSiteClass ? *GravelBarSiteClass : AGravelBarSite::StaticClass(), FTransform::Identity);
+		FVector GravelSpawnLocation(6400.0f + GravelBarSiteOffsetFromStart.X, 6400.0f + GravelBarSiteOffsetFromStart.Y, 0.0f);
+		if (APlayerStart* Start = Cast<APlayerStart>(UGameplayStatics::GetActorOfClass(GetWorld(), APlayerStart::StaticClass())))
+		{
+			const FVector StartLocation = Start->GetActorLocation();
+			GravelSpawnLocation = FVector(StartLocation.X + GravelBarSiteOffsetFromStart.X, StartLocation.Y + GravelBarSiteOffsetFromStart.Y, 0.0f);
+		}
+
+		GravelSite = GetWorld()->SpawnActor<AGravelBarSite>(GravelBarSiteClass ? *GravelBarSiteClass : AGravelBarSite::StaticClass(), FTransform(GravelSpawnLocation));
 	}
 
 	// bAutoCreateNavigationData has proven unreliable for this world - MainNavData sometimes never
@@ -71,6 +83,15 @@ void ADestructionGameMode::BeginPlay()
 		if (APlayerStart* Start = Cast<APlayerStart>(UGameplayStatics::GetActorOfClass(GetWorld(), APlayerStart::StaticClass())))
 		{
 			SpawnLocation = Start->GetActorLocation();
+		}
+
+		// Snap to whichever terrain is actually providing collision here (the persistent Landscape,
+		// or the rollback heightfield) instead of trusting PlayerStart's own Z or the hardcoded
+		// fallback - keeps Bill from spawning buried or floating regardless of terrain system.
+		float GroundZ;
+		if (FTerrainSurfaceQuery::TraceGroundZ(GetWorld(), SpawnLocation.X, SpawnLocation.Y, GroundZ))
+		{
+			SpawnLocation.Z = GroundZ + ProspectorSpawnStandingHeight;
 		}
 
 		GetWorld()->SpawnActor<AProspectorCharacter>(ProspectorClass ? *ProspectorClass : AProspectorCharacter::StaticClass(), FTransform(SpawnLocation));
