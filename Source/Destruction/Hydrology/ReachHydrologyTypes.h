@@ -38,10 +38,11 @@ enum class EReachBankType : uint8
 };
 
 // Which way the water actually runs along the authored centreline. Stored explicitly rather than
-// inferred from point order or from elevation: the source DEM's vertical resolution over this reach
-// is coarser than the reach's true fall, so elevation alone cannot be trusted to say which end is
-// upstream. Every downstream-ordered system (gold transport, deposition, travel distance) reads
-// this, so guessing it wrong would silently invert the whole placer model.
+// inferred from elevation: the source data is hydro-flattened, so it carries a water level but no
+// usable slope, and the reach's true fall is smaller than the noise in the valley-floor elevations.
+// Direction is therefore expressed against point order alone. Every downstream-ordered system (gold
+// transport, deposition, travel distance) reads this, so getting it wrong would silently invert the
+// whole placer model.
 UENUM(BlueprintType)
 enum class EReachFlowDirection : uint8
 {
@@ -69,8 +70,10 @@ struct FReachHydrologySample
 {
 	GENERATED_BODY()
 
-	// Distance along the centreline from the upstream end, in cm. Populated from the authored
-	// spline rather than stored by hand, so it cannot drift out of sync with the geometry.
+	// Horizontal chainage along the centreline from the upstream end, in cm. Accumulated in XY only,
+	// the way river chainage is conventionally measured - deliberately not the spline's 3D length, so
+	// that revising the reach's elevations can never shift the distances that gold transport and
+	// deposition are computed from. Regenerated from the authored geometry, never stored by hand.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reach|Path")
 	float DownstreamDistance = 0.0f;
 
@@ -83,10 +86,11 @@ struct FReachHydrologySample
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reach|Channel")
 	float RightWidth = 0.0f;
 
-	// Absolute world Z of the water surface at this station, in cm. Deliberately left at zero: this
-	// is NOT yet solved, and the authored centreline's own Z is a valley-floor corridor mean, not a
-	// water level, so it must not be copied in here as a stand-in. Establishing this needs a real
-	// water-surface pass - see EReachFlowDirection for why the source elevation data cannot settle it.
+	// Absolute world Z of the water surface at this station, in cm. Authored from a single approved
+	// reference that matches where the current Landscape's river actually sits, so visible water and
+	// wading depth agree with the terrain we ship. Constant along the reach: the source data is
+	// hydro-flattened and carries a water level but no slope, so a gradient here would be invented.
+	// Still NOT the centreline's own Z, which is a valley-floor corridor mean - never copy that in.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reach|Channel")
 	float WaterSurfaceElevation = 0.0f;
 

@@ -37,22 +37,27 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Reach")
 	TObjectPtr<USplineComponent> Centerline;
 
-	// Which way the water runs. Left Undetermined on purpose: over this reach the source DEM's
-	// vertical noise is larger than the reach's true fall, so the elevation profile is not a
-	// reliable guide, and the approved endpoint elevations imply a net rise from the labelled
-	// upstream end to the labelled downstream end. Nothing should consume a guessed direction, so
-	// this stays unset until it is established deliberately.
+	// Which way the water runs. Established from evidence rather than from the station labels or from
+	// the elevation profile, both of which are unreliable here - see RebuildFromApprovedCenterline for
+	// the four independent lines that settled it. Regenerated on every rebuild: the authored water
+	// surface is flat, so ordered point direction is the only thing carrying flow, and losing it would
+	// silently invert placer-gold transport along the whole reach.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Reach")
-	EReachFlowDirection FlowDirection = EReachFlowDirection::Undetermined;
+	EReachFlowDirection FlowDirection = EReachFlowDirection::TowardIncreasingIndex;
 
-	// One record per centreline point, index-aligned with the spline. Mostly defaulted for now:
-	// this pass fixes the geometry and the shape of the record, not its hydrology contents.
+	// One record per centreline point, index-aligned with the spline. Geometry, downstream chainage and
+	// water surface are authored; depth, bank classification, bend and deposition are still defaulted.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Reach")
 	TArray<FReachHydrologySample> Samples;
 
-	// Rebuilds the spline and the sample array from the compiled-in approved centreline, discarding
-	// any hand edits. Explicit rather than automatic so the authored data is never silently
+	// Rebuilds the spline, flow direction and sample array from the compiled-in approved data,
+	// discarding any hand edits. Explicit rather than automatic so the authored data is never silently
 	// regenerated underneath someone's work in the editor.
+	//
+	// Everything approved is regenerated here rather than hand-entered on the instance, so re-running
+	// this reproduces identical values instead of erasing them. Anything typed into Samples by hand
+	// will not survive - if a field needs to be authored per station, give it a source of truth here
+	// first.
 	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Reach")
 	void RebuildFromApprovedCenterline();
 

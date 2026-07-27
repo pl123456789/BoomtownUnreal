@@ -179,6 +179,24 @@ namespace
 	};
 
 	constexpr int32 ApprovedCenterlineNum = UE_ARRAY_COUNT(ApprovedCenterline);
+
+	// The approved water-surface reference for the whole Primary reach, in absolute world cm.
+	//
+	// This is the elevation the current Landscape's river actually sits at, not a surveyed river
+	// level. The source DEM is hydro-flattened: 92 of the 136 stations have a modal elevation of
+	// exactly this value, and 74 of 136 traces against the shipped Landscape land exactly on it. So
+	// it is a real, reproducible property of the terrain we have - which is what visible water and
+	// wading depth have to agree with - rather than a measurement of the real river.
+	//
+	// Deliberately a single constant with no gradient. Because the source is hydro-flattened it
+	// carries a water *level* but no water *slope* (regression across the flat section: 0.0000 m/km,
+	// R^2 = 0.000), and the Landscape is genuinely flat for ~0.774 km of the reach. Inventing a
+	// downstream grade would make the surface clip into that flat bed at one end and float above it
+	// at the other, so the flat value is both the better-evidenced and the better-looking choice.
+	//
+	// This is not a claim that the real river is level. When the Landscape's own river profile is
+	// revisited (deferred to R6A/R6B), this constant is the single place that has to change.
+	constexpr float ApprovedWaterSurfaceZ = -87384.8f;
 }
 
 APrimaryReachHydrology::APrimaryReachHydrology()
@@ -202,12 +220,19 @@ void APrimaryReachHydrology::RebuildFromApprovedCenterline()
 		return;
 	}
 
+	// Register the actor and its spline for modification before touching either. Without this the
+	// regenerated values live only in memory: the editor never marks the actor's package dirty, so
+	// "Save Current Level" finds nothing to write and the rebuild is silently lost on exit. This also
+	// puts the rebuild on the undo stack, which matters for a button that discards hand edits.
+	Modify();
+	Centerline->Modify();
+
 	Centerline->ClearSplinePoints(false);
 
 	// The spline's own Z carries CorridorZ purely so the centreline sits somewhere sensible in the
 	// viewport while authoring. Treat it as reference geometry: it is a valley-floor mean, not a
-	// water level, and nothing should read a water surface off this spline. That value belongs in
-	// FReachHydrologySample::WaterSurfaceElevation, which stays unset until it is established.
+	// water level, and nothing should read a water surface off this spline. The water level lives in
+	// FReachHydrologySample::WaterSurfaceElevation, populated below from ApprovedWaterSurfaceZ.
 	for (int32 Index = 0; Index < ApprovedCenterlineNum; ++Index)
 	{
 		const FApprovedCenterlinePoint& Point = ApprovedCenterline[Index];
@@ -226,14 +251,42 @@ void APrimaryReachHydrology::RebuildFromApprovedCenterline()
 
 	Centerline->UpdateSpline();
 
-	// Rebuild the sample records index-aligned with the spline. Only the fields that follow directly
-	// from the approved geometry are filled; everything hydrological stays at its default until it
-	// is established from something that can actually resolve it.
+	// Water runs from the first approved station toward the last. Established independently of the
+	// station labels: the hydro-flattened pool sits below the upstream channel, the Landscape averages
+	// ~0.48 m above that pool over the upstream stations, the corridor widens monotonically from 351 m
+	// to 863 m, and the channel floor keeps dropping past the downstream end. Set here rather than
+	// left to the property default so a rebuild always restores it - the flat water profile carries no
+	// gradient, so point order is the only thing that expresses flow, and it must never be lost.
+	FlowDirection = EReachFlowDirection::TowardIncreasingIndex;
+
+	// Rebuild the sample records index-aligned with the spline. Everything derivable from the approved
+	// geometry and the approved water reference is regenerated here, so re-running this reproduces
+	// identical values rather than destroying them. Fields that still need real authoring (depth, bank
+	// classification, bend, deposition) stay at their defaults.
 	Samples.Reset(ApprovedCenterlineNum);
+	float Chainage2D = 0.0f;
 	for (int32 Index = 0; Index < ApprovedCenterlineNum; ++Index)
 	{
+		// Horizontal chainage, accumulated in XY only - deliberately not the spline's own 3D length.
+		// The two differ by just 7.3 cm over the whole 1.887 km reach, but the 3D figure is inflated by
+		// vertical wander in CorridorZ, which is placeholder valley-floor data. Tying downstream
+		// distance to it would mean that revising the reach's elevations later silently shifted every
+		// distance, and with it every gold-transport and deposition result that reads them.
+		if (Index > 0)
+		{
+			const FApprovedCenterlinePoint& Prev = ApprovedCenterline[Index - 1];
+			const FApprovedCenterlinePoint& Curr = ApprovedCenterline[Index];
+			Chainage2D += FVector2D::Distance(
+				FVector2D(Prev.WorldX, Prev.WorldY),
+				FVector2D(Curr.WorldX, Curr.WorldY));
+		}
+
 		FReachHydrologySample Sample;
-		Sample.DownstreamDistance = Centerline->GetDistanceAlongSplineAtSplinePoint(Index);
+		Sample.DownstreamDistance = Chainage2D;
+
+		// Flat across the whole reach - see ApprovedWaterSurfaceZ for why this carries a level but no
+		// slope, and why that is the honest reading of the terrain rather than a missing feature.
+		Sample.WaterSurfaceElevation = ApprovedWaterSurfaceZ;
 
 		// The corridor half-width is the widest the channel could be here, not the channel itself.
 		// Recorded symmetrically because nothing has yet established which bank the deep water runs
