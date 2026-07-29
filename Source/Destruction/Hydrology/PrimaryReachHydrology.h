@@ -61,6 +61,16 @@ public:
 	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Reach")
 	void RebuildFromApprovedCenterline();
 
+	// Measures the shipped Landscape against the authored water surface at every approved station and
+	// logs the profile: chainage, ground Z, water Z, and the clearance between them.
+	//
+	// Strictly read-only. It writes to no property and stores no result, so running it can never dirty
+	// the actor's package - the measurements exist only in the log. Stations whose ground trace misses
+	// are reported as failures and left unmeasured rather than filled with an assumed elevation; a
+	// guessed Z here would silently become the basis for terrain correction.
+	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Reach")
+	void AuditLandscapeProfile() const;
+
 	// Total centreline length in cm, straight from the spline.
 	UFUNCTION(BlueprintCallable, Category = "Reach")
 	float GetReachLength() const;

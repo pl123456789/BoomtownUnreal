@@ -208,7 +208,7 @@ Taken directly from `git log`. This table is the authoritative answer to "what i
 | M0011 | Windows Alpha 0.1 packaging | `f98d6a7` | 2026-07-23 | **COMMIT** · not a v1.0 milestone |
 | M0012 | — | — | — | **NONE** — number never used |
 | M0013 | Landscape runtime integration and navigation validation | `b603ce7` | 2026-07-25 | **COMMIT** · WIP checkpoint `94e0037` precedes it |
-| M0014 | Primary reach hydrology | `cec8ee2`, `afdc57a`, `589bf9b`, `3da785d` | 2026-07-26/27 | **IN PROGRESS** — R4A, R5C, R5D landed; not closed out; **blocked by DEF-001** |
+| M0014 | Primary reach hydrology | `cec8ee2`, `afdc57a`, `589bf9b`, `3da785d` | 2026-07-26/27 | **IN PROGRESS** — R4A, R5C, R5D landed; R6A audit complete (see below); not closed out; **blocked by DEF-001** |
 | M0015 | Transfer vacation work to home PC | — | 2026-07-29 | **PASSED, no commit** — an ops milestone whose correct result is an unchanged repo |
 | M0016 | Build Bible reconciliation (this document) | — | 2026-07-29 | in progress |
 
@@ -217,6 +217,27 @@ Taken directly from `git log`. This table is the authoritative answer to "what i
 ### Numbers that are spent
 
 M0001–M0016 are consumed as recorded above, including the M0001 and M0012 gaps. **Do not reuse them.** The forward queue starts at M0017.
+
+### M0014-R6A — Primary Reach landscape profile audit (verified 2026-07-29)
+
+Measured result, not a plan. Full evidence in [`M0014_R6A_PRIMARY_REACH_PROFILE.md`](M0014_R6A_PRIMARY_REACH_PROFILE.md).
+
+| Metric | Verified value |
+|---|---|
+| Stations evaluated | 136 / 136 |
+| Trace failures | 0 |
+| AT_SURFACE (within ±0.1 cm epsilon) | 74 |
+| ABOVE water | 62 |
+| BELOW water | **0** |
+| Determinism | 4 consecutive runs, byte-identical |
+
+Classification uses a minimal ±0.1 cm floating-point epsilon, not a correction tolerance: this audit measures the existing physical relationship between ground and water. It does not decide how much deviation should be treated as acceptable — incision depth and correction tolerance are R6B decisions, made later, against this data.
+
+**No sampled centreline ground lies below the authored water surface** — maximum clearance is exactly `0.0` cm and the minimum ground Z equals the water Z.
+
+Five contiguous measured terrain-relation zones alternate along the reach: idx 0–26 ABOVE, idx 27–36 AT_SURFACE, idx 37–60 ABOVE, idx 61–124 AT_SURFACE, idx 125–135 ABOVE.
+
+This establishes the measured terrain-relation only; R6B will decide incision depth and correction tolerances against this data. **R6B remains unimplemented.**
 
 ### Known defects
 

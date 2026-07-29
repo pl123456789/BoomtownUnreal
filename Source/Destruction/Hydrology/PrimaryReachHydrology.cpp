@@ -2,6 +2,7 @@
 
 #include "PrimaryReachHydrology.h"
 #include "Components/SplineComponent.h"
+#include "Terrain/TerrainSurfaceQuery.h"
 
 namespace
 {
@@ -297,6 +298,129 @@ void APrimaryReachHydrology::RebuildFromApprovedCenterline()
 
 		Samples.Add(Sample);
 	}
+}
+
+void APrimaryReachHydrology::AuditLandscapeProfile() const
+{
+	// A minimal floating-point epsilon, not a correction tolerance. This audit measures the existing
+	// physical relationship between ground and water; it does not decide how much deviation R6B should
+	// treat as acceptable. That decision - incision depth, correction tolerance - belongs to R6B.
+	constexpr float SurfaceEpsilonCm = 0.1f;
+
+	const UWorld* World = GetWorld();
+	if (World == nullptr || Centerline == nullptr || Samples.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[R6A] Audit aborted: World=%s Centerline=%s Samples=%d"),
+			World ? TEXT("valid") : TEXT("null"),
+			Centerline ? TEXT("valid") : TEXT("null"),
+			Samples.Num());
+		return;
+	}
+
+	// Terrain sits above the water surface, below it, or at it (within floating-point epsilon). Anything
+	// unmeasured stays its own outcome rather than being folded into one of the three - see the
+	// trace-failure note above.
+	enum class EStationState : uint8 { Above, AtSurface, Below, Unmeasured };
+	auto StateName = [](EStationState S) -> const TCHAR*
+	{
+		switch (S)
+		{
+		case EStationState::Above:     return TEXT("ABOVE");
+		case EStationState::AtSurface: return TEXT("AT_SURFACE");
+		case EStationState::Below:     return TEXT("BELOW");
+		default:                       return TEXT("UNMEASURED");
+		}
+	};
+
+	TArray<EStationState> States;
+	TArray<float> Chainages;
+	States.Reserve(Samples.Num());
+	Chainages.Reserve(Samples.Num());
+
+	int32 TraceFailures = 0;
+
+	UE_LOG(LogTemp, Display, TEXT("[R6A] BEGIN Primary Reach landscape profile audit - %d stations, epsilon %.1f cm"),
+		Samples.Num(), SurfaceEpsilonCm);
+	UE_LOG(LogTemp, Display, TEXT("[R6A] idx,chainage_cm,ground_z_cm,water_z_cm,clearance_cm,trace,state"));
+
+	for (int32 Index = 0; Index < Samples.Num(); ++Index)
+	{
+		const FReachHydrologySample& Sample = Samples[Index];
+		const FVector StationLocation = Centerline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::World);
+
+		float GroundZ = 0.0f;
+		const bool bHit = FTerrainSurfaceQuery::TraceGroundZ(World, StationLocation.X, StationLocation.Y, GroundZ);
+
+		// Positive clearance means the water surface sits above the ground - the station is submerged.
+		// Negative means terrain stands proud of the authored water surface.
+		const float Clearance = bHit ? (Sample.WaterSurfaceElevation - GroundZ) : 0.0f;
+
+		EStationState State = EStationState::Unmeasured;
+		if (!bHit)
+		{
+			++TraceFailures;
+		}
+		else if (Clearance > SurfaceEpsilonCm)
+		{
+			State = EStationState::Below;
+		}
+		else if (Clearance < -SurfaceEpsilonCm)
+		{
+			State = EStationState::Above;
+		}
+		else
+		{
+			State = EStationState::AtSurface;
+		}
+
+		States.Add(State);
+		Chainages.Add(Sample.DownstreamDistance);
+
+		if (bHit)
+		{
+			UE_LOG(LogTemp, Display, TEXT("[R6A] %d,%.1f,%.1f,%.1f,%.1f,HIT,%s"),
+				Index, Sample.DownstreamDistance, GroundZ, Sample.WaterSurfaceElevation, Clearance, StateName(State));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Display, TEXT("[R6A] %d,%.1f,NONE,%.1f,NONE,MISS,%s"),
+				Index, Sample.DownstreamDistance, Sample.WaterSurfaceElevation, StateName(State));
+		}
+	}
+
+	// Contiguous runs of the same measured terrain-relation state. R6B, not this audit, decides which of
+	// these need correction and by how much.
+	UE_LOG(LogTemp, Display, TEXT("[R6A] --- contiguous sections ---"));
+	UE_LOG(LogTemp, Display, TEXT("[R6A] state,first_idx,last_idx,start_chainage_cm,end_chainage_cm,stations"));
+
+	int32 RunStart = 0;
+	for (int32 Index = 1; Index <= States.Num(); ++Index)
+	{
+		const bool bRunEnds = (Index == States.Num()) || (States[Index] != States[RunStart]);
+		if (bRunEnds)
+		{
+			const int32 RunEnd = Index - 1;
+			UE_LOG(LogTemp, Display, TEXT("[R6A] %s,%d,%d,%.1f,%.1f,%d"),
+				StateName(States[RunStart]), RunStart, RunEnd,
+				Chainages[RunStart], Chainages[RunEnd], (RunEnd - RunStart) + 1);
+			RunStart = Index;
+		}
+	}
+
+	int32 AboveCount = 0, AtSurfaceCount = 0, BelowCount = 0;
+	for (EStationState State : States)
+	{
+		switch (State)
+		{
+		case EStationState::Above:     ++AboveCount; break;
+		case EStationState::AtSurface: ++AtSurfaceCount; break;
+		case EStationState::Below:     ++BelowCount; break;
+		default: break;
+		}
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("[R6A] END stations=%d above=%d at_surface=%d below=%d trace_failures=%d"),
+		States.Num(), AboveCount, AtSurfaceCount, BelowCount, TraceFailures);
 }
 
 float APrimaryReachHydrology::GetReachLength() const
