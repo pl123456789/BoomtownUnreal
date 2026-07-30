@@ -188,7 +188,7 @@ Unchanged from v1.0. The ages protect the long vision; only the active milestone
 
 ---
 
-## 6. As-built record — M0001 to M0016
+## 6. As-built record — M0001 to M0018
 
 Taken directly from `git log`. This table is the authoritative answer to "what is done?"
 
@@ -208,15 +208,17 @@ Taken directly from `git log`. This table is the authoritative answer to "what i
 | M0011 | Windows Alpha 0.1 packaging | `f98d6a7` | 2026-07-23 | **COMMIT** · not a v1.0 milestone |
 | M0012 | — | — | — | **NONE** — number never used |
 | M0013 | Landscape runtime integration and navigation validation | `b603ce7` | 2026-07-25 | **COMMIT** · WIP checkpoint `94e0037` precedes it |
-| M0014 | Primary reach hydrology | `cec8ee2`, `afdc57a`, `589bf9b`, `3da785d` | 2026-07-26/27 | **IN PROGRESS** — R4A, R5C, R5D landed; R6A audit complete (see below); not closed out; **blocked by DEF-001** |
+| M0014 | Primary reach hydrology | `cec8ee2`, `afdc57a`, `589bf9b`, `3da785d`, `b71d136` | 2026-07-26/27, R6A 2026-07-29 | **IN PROGRESS** — R4A, R5C, R5D, R6A landed; DEF-001 (introduced by R4A) resolved by M0018; hydrology channel-incision decision (R6B) still open |
 | M0015 | Transfer vacation work to home PC | — | 2026-07-29 | **PASSED, no commit** — an ops milestone whose correct result is an unchanged repo |
-| M0016 | Build Bible reconciliation (this document) | — | 2026-07-29 | in progress |
+| M0016 | Build Bible reconciliation (this document) | `c82d276` | 2026-07-29 | **COMMIT** |
+| M0017 | Primary reach hydrology close-out and DEF-001 repair | — | 2026-07-29/30 | **CANCELLED/FAILED** — DEF-001 investigation ran under this number; no commit was produced, and every experiment was rolled back to `b71d136`. Superseded: hydrology stays under M0014, DEF-001 was repaired under M0018 |
+| M0018 | Standalone Landscape material repair (DEF-001) | — | 2026-07-30 | **PASSED, awaiting commit approval** — see DEF-001 resolution in §6 known defects |
 
-**M0014 is the open milestone.** It has four commits and an R-series naming scheme that implies further steps. Nothing in the repo marks it closed, so it is not closed.
+**M0014 is the open milestone.** It has five commits and an R-series naming scheme that implies further steps. Nothing in the repo marks it closed, so it is not closed. Next hydrology step is **M0014-R6B** (channel-incision decision, informational only, not yet authorized).
 
 ### Numbers that are spent
 
-M0001–M0016 are consumed as recorded above, including the M0001 and M0012 gaps. **Do not reuse them.** The forward queue starts at M0017.
+M0001–M0018 are consumed as recorded above, including the M0001 and M0012 gaps and the cancelled M0017. **Do not reuse them.** The forward queue starts at M0019.
 
 ### M0014-R6A — Primary Reach landscape profile audit (verified 2026-07-29)
 
@@ -247,7 +249,7 @@ Open defects against as-built work. A defect is not a milestone — under the de
 
 | Field | Detail |
 |---|---|
-| **Status** | OPEN — blocks M0014 |
+| **Status** | **RESOLVED by M0018**, 2026-07-30 |
 | **Discovered** | 2026-07-29, Play → Standalone Game |
 | **Introduced by** | `afdc57a` (M0014-R4A), 2026-07-26 |
 | **Severity** | Game is unrunnable outside the editor |
@@ -296,7 +298,21 @@ Sequencing matters: rebuilding while the diagnostic is still assigned bakes the 
 
 **Unverified.** The material's usage flags; the Landscape Material slot value as the editor reports it; whether Landscape Build All alone clears the defect; and cooked-build behaviour. Binary asset inspection proves the reference exists in ten component files — it does not prove intent or causation.
 
-**Relationship to M0015.** None. The M0015 transfer passed on its own terms — build, UE 5.8 launch, `AIDestruction` load, MCP endpoint, and an unchanged repository were all verified. DEF-001 is a pre-existing asset-state defect dating to 2026-07-26 that the transfer neither caused nor was required to detect. **It remains unfixed.**
+**Relationship to M0015.** None. The M0015 transfer passed on its own terms — build, UE 5.8 launch, `AIDestruction` load, MCP endpoint, and an unchanged repository were all verified. DEF-001 is a pre-existing asset-state defect dating to 2026-07-26 that the transfer neither caused nor was required to detect.
+
+#### Resolution — M0018, 2026-07-30
+
+Repair option 2 from the list above, in its final form: the diagnostic Material Instance Constant was replaced outright rather than kept and rebuilt.
+
+**What changed.** A new plain `Material` asset, `/Game/Materials/M_Landscape`, was created and assigned as the main Landscape actor's `LandscapeMaterial`. Every loaded proxy's component material instances were regenerated against it, and the main Landscape actor plus all **256** `LandscapeStreamingProxy` packages were saved — **257 Landscape packages total**. `MI_LandscapeReadability_M0014` and `M_LandscapeReadability_M0014` were deleted, and `Content/Materials/Diagnostic/` no longer exists. Verified after the change: all 257 saved packages reference `M_Landscape`; zero files anywhere in `Content/` reference the old diagnostic assets or path; no redirectors were left behind.
+
+**Why this works.** The prior suspected-cause section left open whether the diagnostic MIC assignment caused the per-component staleness or merely travelled with it. That question is not resolved by this fix and is not being claimed as resolved. What is established: replacing the Landscape's material with a plain `UMaterial` removed the observed failing condition, and the 70-second cold Standalone test below demonstrates the defect no longer reproduces. No claim is made here about which internal engine code path is or isn't reachable.
+
+**Verification.** Cold Standalone launch (`-game`, no editor parent) reached `AIDestruction` with `IsEditor=0, IsGame=1`, survived 70 seconds with zero `SetParentEditorOnly` or assertion occurrences in the log, and was terminated cleanly by the test harness rather than crashing. Philippe separately smoke-tested movement and gold panning and confirmed terrain appearance remains acceptable.
+
+**Scope discipline during cleanup.** The post-save diff initially included two packages — a `PostProcessVolume` and a `NavMeshBoundsVolume` — with real content changes unrelated to the material repair (accidental saves swept in alongside the intended 257). Both were identified by checking which changed files failed to reference `M_Landscape`, and were individually restored to `b71d136` rather than resetting the whole change set.
+
+**Unresolved.** Whether a *cooked* Shipping build behaves identically to this Development Standalone test remains unverified — see §12. `Content/Levels/Test/TerrainValidation` was not touched by this repair and was not re-tested.
 
 ---
 
@@ -378,33 +394,25 @@ Two structural departures beyond renumbering:
 
 ---
 
-## 9. Forward queue — M0017 onward
+## 9. Forward queue — M0019 onward
 
 v1.0's unbuilt milestones, renumbered into a single forward sequence, with additions where the repo created needs v1.0 never anticipated. Age I still ends at M0050.
 
-### Batch A — close out what is open (M0017)
-
-| ID | Milestone | Deliverable | Acceptance test |
-|---|---|---|---|
-| M0017 | Primary reach hydrology close-out **and DEF-001 repair** | The remaining M0014 R-steps — **to be enumerated before approval, see below** — plus the DEF-001 repair | One observable condition per R-step; **and** Standalone Game reaches `AIDestruction` without the `SetParentEditorOnly` assert |
-
-> **Numbering basis.** M0017 carries M0014's remaining work under a separate number by the late-discovered-defect amendment in §4. **M0014 stays open in §6 until M0017 lands** — it does not get to look finished because M0017 is doing its work. M0017's commit message must name both DEF-001 and M0014.
->
-> **M0017 is not approvable in its current form.** "Finish the R-series" would let the milestone invent its own scope during execution, which is exactly what the build contract forbids. The R-step list must be written down first, each with an observable acceptance condition.
->
+Hydrology close-out (**M0014-R6B**, the channel-incision decision) and DEF-001 (**resolved by M0018**, §6) are no longer forward-queue items — both are tracked at their respective sections above, not here. This section previously combined them as a single M0017 milestone; that milestone was cancelled (§6) and its two halves resolved separately under their real numbers.
 > **What the repository establishes.** `APrimaryReachHydrology` is an authoring record for the approved ~1.887 km Primary reach. It holds the authored centreline (compiled-in, not rediscovered at runtime), an evidence-derived flow direction, and one index-aligned sample per point carrying geometry and downstream chainage. It exposes `RebuildFromApprovedCenterline()` (CallInEditor), `GetReachLength()`, and a nearest-sample lookup. It **deliberately draws nothing** — rendering visible water is explicitly delegated to a future consumer that reads from it.
 >
 > **What the repository does not establish.** The R-series itself. Git contains R4A, R5C, and R5D; R5A and R5B appear nowhere, so they were either skipped, renamed, or done without commits. The series therefore cannot be reconstructed from the repository, and nothing in it defines the terminal step.
 >
 > **Required before approval:** Philippe and the Technical Director supply the remaining R-step list. Each entry needs an observable condition — a value that can be read, a query that returns a known answer, or a visible result — not "looks right". Candidate conditions the code already supports: `GetReachLength()` returns the approved 1.887 km within tolerance; the nearest-sample query returns monotonically increasing chainage along the centreline; `RebuildFromApprovedCenterline()` is idempotent across repeated runs.
 
-### Batch B — control polish and command language (M0018–M0026)
+### Batch B — control polish and command language (M0019–M0026)
 
 Carried from v1.0 Batch 2. Most are unbuilt; **M0020 and M0025 are not** — Escape deselect and shift-modified job queueing already exist in source, so those two are completion and acceptance work rather than new implementation. See §3.
 
+> **Correction.** This batch previously planned "Selection ring" at M0018 as unbuilt work. It is not unbuilt: `SelectionRingMesh` shipped in `fa7345d` (M0005 CoH3 Unit Selection) and is still present in `ProspectorCharacter`. The row is removed rather than renumbered. M0018 is fully consumed by the DEF-001 repair (§6); the forward queue starts at **M0019**.
+
 | ID | Milestone | Deliverable | Acceptance test |
 |---|---|---|---|
-| M0018 | Selection ring | Reusable ground ring shown only for selected units | Ring follows terrain, disappears instantly on deselect |
 | M0019 | Hover feedback | Highlight selectable under cursor without selecting | Only the hovered selectable highlights; clears reliably |
 | M0020 | Escape cancel stage — **completion** | Deselect already works (`DoDeselectCommand` → `DeselectCurrentUnit`). Add the missing first stage: Escape cancels the active command or job queue, and only deselects when there is nothing left to cancel | Two-stage behaviour is predictable, never strands a unit mid-order, and never deselects while a cancellable order is running |
 | M0021 | Command acknowledgement | Visual and audio feedback for valid and invalid commands | Fires once per command; invalid orders are distinguishable |
@@ -517,11 +525,11 @@ Every feature, at any stage, is tested against these eight laws before it is add
 
 Demo Alpha is complete only when:
 
-- M0017–M0050 are verified in the Unreal branch, each with a commit;
+- M0019–M0050 are verified in the Unreal branch, each with a commit;
 - the 30-minute First Gold to First Camp session works from a clean build;
 - save/load restores the vertical slice;
 - a two-client smoke test completes without duplicated resources, stuck workers, or authority errors.
 
 The two-client clause is currently unsatisfiable — see the contract debt in §2 and milestone M0031. Demo Alpha cannot be declared before that milestone lands, regardless of how complete the single-player loop looks.
 
-The clean-build clause is also **at risk**: **DEF-001** crashes Standalone Game at startup. Whether a cooked package fails the same way is unknown — cooking may rebuild the stale landscape data, and Shipping handles assertions differently from Development. Packaging is therefore **blocked or at risk until a cooked-build test passes**. Do not declare Demo Alpha on the strength of a PIE session, and do not assume a package is fine merely because it is cooked.
+The clean-build clause no longer has a known Standalone crash: **DEF-001 is resolved by M0018** (§6). What remains outstanding is narrower — whether a **cooked/Shipping** build behaves identically to the verified Development Standalone test is unverified. Packaging is therefore **at risk until a cooked-build test passes**, not blocked by a reproducing crash. Do not declare Demo Alpha on the strength of a PIE session, and do not assume a package is fine merely because it is cooked.
